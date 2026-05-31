@@ -1,0 +1,25 @@
+# neuro-matrix
+
+> A Claude Code plugin (harness) that keeps AI-assisted coding anchored to common sense and reality — an anti-"neuroslop" AI + developer co-system. It contributes runtime invariants with a randomized per-turn self-check, deterministic hooks (cycle-detector, approval gate, verification gate), four agents (developer, analyzer, critic, epistemic-auditor), and a held-out evaluation harness. Designed under game theory (Nash-style cooperative equilibrium) and systems theory.
+
+## Core protocol
+- [CLAUDE.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/CLAUDE.md): the operating protocol — focus goal (common sense + reality), hard prohibitions, mutation/mental-model/halt gates, epistemic boundary, request routing.
+- [invariants.txt](https://github.com/AlexShchuka/neuro-matrix/blob/main/invariants.txt): the runtime invariants, each with risk + deontic tags and a Counter clause; one is sampled per turn as a self-check.
+- [README.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/README.md): why, on what concepts, how to work as a team, and what the project is for.
+- [ROADMAP.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/ROADMAP.md): the backlog of record and the reserved strategic layer.
+
+## Agents (the co-system roles)
+- [agents/developer.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/agents/developer.md): code mutator — the only agent that writes code, runs builds/tests, and pushes.
+- [agents/analyzer.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/agents/analyzer.md): system investigator — RCA, design, review, dead-end diagnostics.
+- [agents/critic.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/agents/critic.md): anti-neuroslop reviewer — the approval gate before output lands.
+- [agents/epistemic-auditor.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/agents/epistemic-auditor.md): separates confirmed from associative claims; developer-side mutual-doubt checks.
+
+## Hooks and scripts
+- [hooks/hooks.json](https://github.com/AlexShchuka/neuro-matrix/blob/main/hooks/hooks.json): event wiring for the operational gates.
+- [scripts/verification-gate.sh](https://github.com/AlexShchuka/neuro-matrix/blob/main/scripts/verification-gate.sh): post-execution verification gate (machine-checkable evidence before commit).
+- [scripts/random-invariant.sh](https://github.com/AlexShchuka/neuro-matrix/blob/main/scripts/random-invariant.sh): risk-weighted per-turn invariant sampler.
+
+## Evaluation
+- [eval/criteria.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/eval/criteria.md): the 17-criterion binary rubric.
+- [eval/run_suite.py](https://github.com/AlexShchuka/neuro-matrix/blob/main/eval/run_suite.py): A/B harness over plugin calibrations.
+- [references/research-anchors.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/references/research-anchors.md): catalogued academic sources behind the protocol.
