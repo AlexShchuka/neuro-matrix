@@ -106,3 +106,30 @@ Forward extracted decisions, not raw user comments. One comprehensive call per a
 
 ## Tool discipline
 Large outputs (full diffs, dumps, big curl) → write to file → read. Never reason on truncated previews. When two tools disagree, the network-side command wins.
+
+## Developing this repository
+Repo-local operational notes (not part of the shipped protocol above). Key files:
+
+| Path | Role |
+|---|---|
+| `invariants.txt` | runtime invariants (`[risk][deontic]` + `Counter:`), sampled per turn |
+| `hooks/hooks.json` | hook wiring — SessionStart · UserPromptSubmit · PreToolUse |
+| `scripts/*.sh` · `scripts/*.py` | hook implementations: sampler, approval + verification gates, cycle-detector, canary check |
+| `agents/*.md` | sub-agent role prompts — developer · analyzer · critic · epistemic-auditor |
+| `eval/` | held-out A/B harness — `criteria.md`, `run_suite.py`, `statistical_test.py`, `questions/`, `adversarial/` |
+| `references/protocol/` · `references/per-stack/` | extended framing · stack notes |
+
+**Local verification** (mirrors `scripts/verification-gate.sh`; run from repo root):
+```bash
+bash -n scripts/*.sh                              # shell syntax
+python3 -m py_compile eval/*.py scripts/*.py      # python parse
+jq empty hooks/hooks.json .claude-plugin/*.json   # json well-formed
+```
+**Eval** — required after any change to `CLAUDE.md`, `invariants.txt`, `agents/*`, or hook scripts (`eval/README.md`):
+```bash
+python3 eval/run_suite.py --refs <baseline-ref>=baseline,HEAD=candidate \
+  --probes questions,adversarial --k 5 --out results.csv --prompts-dir prompts/
+python3 scripts/check-canary-leak.py results.csv
+python3 eval/statistical_test.py results.csv --baseline baseline --candidate candidate
+```
+**Merge gate** (`eval/README.md`): no probe regresses below its current score; responses scored by hand against `eval/criteria.md` (`eval/runner.md`). Inspect a role's inherited invariants: `scripts/role-invariants.sh <role>`.
