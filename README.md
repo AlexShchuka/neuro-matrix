@@ -92,7 +92,7 @@ Agents are bound to **roles** in the co-system. Names below are current bindings
 
 | Binding | Role | Responsibility |
 |---|---|---|
-| `analyzer` | system investigator | RCA, architecture, MR/PR review, dead-end diagnostics, domain-term routing through cross-repo search |
+| `analyzer` | system investigator | RCA, architecture, MR/PR review, dead-end diagnostics, domain-term routing (surface UNVERIFIED when unanchorable) |
 | `developer` | code mutator | Code, tests, build, git push — the only mutator |
 | `critic` | anti-neuroslop reviewer | Reviews proposed output before it lands in shared state |
 | `epistemic-auditor` | epistemic auditor | Boundary between confirmed and associative + developer-side mutual-doubt checks (ambiguous-anchor, cross-turn contradiction, automation-bias) |

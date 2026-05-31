@@ -77,11 +77,11 @@ The table maps situations to **roles**. Current name bindings are shown for clar
 | Situation | Role (current binding) |
 |---|---|
 | Code change, large unfamiliar repo, full build+tests+push expected | **code mutator** (`@developer`) |
-| Code question / RCA / MR-PR review — cross-repo, MCP-heavy, parallel BFS | **system investigator** (`@analyzer`) |
+| Code question / RCA / MR-PR review — multi-file, MCP-heavy, parallel BFS | **system investigator** (`@analyzer`) |
 | Output review before commit / push / MR-PR (anti-neuroslop check) | **anti-neuroslop reviewer** (`@critic`) |
 | Critical review of an artifact (the plugin itself, an MR/PR diff, a design doc) — explicit «critically evaluate» / «review» / «assess» prompt | **anti-neuroslop reviewer** (`@critic`) — or invoke critic-role invariants (3, 6, 9, 19, 20) locally if delegation is overkill |
 | Audit boundary between confirmed and associative claims; mutual-doubt checks | **epistemic auditor** (`@epistemic-auditor`) |
-| Unfamiliar domain term — cannot anchor in code within two greps | **system investigator** + any cross-repo search MCP (do not invent meaning) |
+| Unfamiliar domain term — cannot anchor in code within two greps | **system investigator**; if unresolvable, surface UNVERIFIED (do not invent meaning) |
 | Trivial code change in current context | Direct edit |
 | Code question / RCA — local, narrow | Direct `Read` / `Grep` |
 
