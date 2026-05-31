@@ -34,13 +34,13 @@ Settings → **Pages** → Source: **Deploy from a branch** → Branch: `main` �
 Submitting before merge = broken `/plugin marketplace add` for the first visitor. Merge first.
 
 ### ☐ Submit to the Anthropic official directory
-The curated `anthropics/claude-plugins-official` directory is the primary "Discover" surface; submission goes through their plugin-directory form (expect a quality/security review). Coordinate with issue #4 on what is exposed before submitting. Submission blurb:
+The curated `anthropics/claude-plugins-official` directory is the primary "Discover" surface; submission goes through their plugin-directory form (expect a quality/security review). **License caveat:** the project is now under PolyForm Noncommercial 1.0.0 (source-available, non-commercial — **not** OSI/open-source); confirm the directory accepts non-OSI licenses before submitting, as curated directories often require permissive/open-source. Coordinate with issue #4 on what is exposed before submitting. Submission blurb:
 ```
 neuro-matrix is a Claude Code plugin that keeps AI-assisted coding anchored to reality — runtime invariants with a per-turn self-check, four agents (developer/analyzer/critic/epistemic-auditor), hooks, a dual approval+verification gate, and a held-out evaluation harness. Anti-"neuroslop" AI + developer co-system, designed under game theory and systems theory.
 ```
 
 ### ☐ Open PRs into awesome-lists
-Highest-ROI discovery channel for Claude Code plugins. For each, read its `CONTRIBUTING`, find the right section (Plugins / Workflow), and add the entry below. Verify the current entry format of each list before submitting (formats change).
+Highest-ROI discovery channel for Claude Code plugins. For each, read its `CONTRIBUTING`, find the right section (Plugins / Workflow), and add the entry below. Verify the current entry format of each list before submitting (formats change). Note: some lists require an OSI/open-source license — PolyForm Noncommercial is source-available (non-commercial), so check each list's licensing policy first.
 - `hesreallyhim/awesome-claude-code` (canonical)
 - `ComposioHQ/awesome-claude-plugins`
 - `Chat2AnyLLM/awesome-claude-plugins`
@@ -72,4 +72,4 @@ Content is the strongest ranking/citation signal for a new repo. Decide audience
 ---
 
 ## What was already done in files (no action needed)
-`.claude-plugin/marketplace.json` · `README.md` hero + Install · `llms.txt` · `docs/index.html` landing · `LICENSE` (Apache-2.0) · `COPYRIGHT-NOTICE.md` · `ROADMAP.md` (S2 + this checklist's source).
+`.claude-plugin/marketplace.json` · `README.md` hero + Install · `llms.txt` · `docs/index.html` landing · `LICENSE` (PolyForm Noncommercial 1.0.0) · `COPYRIGHT-NOTICE.md` · `ROADMAP.md` (S2 + this checklist's source).
