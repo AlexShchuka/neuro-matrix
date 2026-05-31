@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>neuro-matrix — anti-neuroslop harness for Claude Code</title>
+  <meta name="description" content="neuro-matrix is a Claude Code plugin (harness) that keeps AI-assisted coding anchored to reality: runtime invariants, hooks, four review agents, a dual approval+verification gate, and a held-out eval harness. Anti-hallucination AI + developer co-system.">
+  <meta name="keywords" content="Claude Code plugin, harness, AI agents, hooks, anti-hallucination, AI code review, LLM evaluation, prompt engineering, agentic, AI safety">
+  <link rel="canonical" href="https://alexshchuka.github.io/neuro-matrix/">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="neuro-matrix — anti-neuroslop harness for Claude Code">
+  <meta property="og:description" content="A Claude Code plugin that keeps AI-assisted coding anchored to reality: runtime invariants, hooks, four review agents, a dual approval+verification gate, and a held-out eval harness.">
+  <meta property="og:url" content="https://alexshchuka.github.io/neuro-matrix/">
+
+  <!-- Twitter card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="neuro-matrix — anti-neuroslop harness for Claude Code">
+  <meta name="twitter:description" content="Runtime invariants, hooks, review agents, a dual approval+verification gate, and a held-out eval harness for Claude Code. Keeps AI-assisted coding anchored to reality.">
+
+  <style>
+    body { font: 16px/1.6 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; max-width: 760px; margin: 0 auto; padding: 2rem 1.2rem; color: #1a1a1a; }
+    h1 { font-size: 2rem; margin-bottom: .2rem; }
+    .tagline { color: #555; font-size: 1.15rem; margin-top: 0; }
+    h2 { margin-top: 2rem; border-bottom: 1px solid #eee; padding-bottom: .2rem; }
+    code, pre { background: #f5f5f5; border-radius: 6px; }
+    code { padding: .1rem .35rem; }
+    pre { padding: .8rem 1rem; overflow-x: auto; }
+    a { color: #0b5fff; }
+    footer { margin-top: 3rem; color: #777; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>neuro-matrix</h1>
+  <p class="tagline">An anti-&ldquo;neuroslop&rdquo; harness for Claude Code that keeps AI-assisted coding anchored to reality.</p>
+
+  <h2>What is neuro-matrix?</h2>
+  <p>
+    neuro-matrix is a <strong>Claude Code plugin</strong> — a calibration protocol for an AI&nbsp;+&nbsp;developer
+    <em>co-system</em>. It contributes runtime <strong>invariants</strong> (with a randomized per-turn self-check),
+    deterministic <strong>hooks</strong> (cycle-detector, approval gate, verification gate), four review
+    <strong>agents</strong> (developer, analyzer, critic, epistemic-auditor), and a held-out
+    <strong>evaluation harness</strong>. The single goal threading every layer: judge every output by what is
+    <em>true and reproducible</em>, never by what merely sounds plausible.
+  </p>
+
+  <h2>Install</h2>
+  <pre><code>/plugin marketplace add AlexShchuka/neuro-matrix
+/plugin install neuro-matrix@neuro-matrix</code></pre>
+  <p>Requires <a href="https://code.claude.com">Claude Code</a>.</p>
+
+  <h2>Why it exists</h2>
+  <p>
+    AI-scaled development tends to accrete <em>neuroslop</em> — code that looks plausible but is architecturally
+    meaningless. neuro-matrix is the anchor against that failure: hypothesis-only claims paired with tool evidence,
+    per-mutation consent gating, halt-on-no-progress, mutual-doubt checks, and an approval&nbsp;+&nbsp;verification
+    dual gate before anything lands. Designed under game theory (a Nash-style cooperative equilibrium) and systems theory.
+  </p>
+
+  <h2>How is it different from a prompt or a set of rules?</h2>
+  <p>
+    The protocol calibrates priors rather than listing imperative steps, and it is enforced at runtime by hooks and
+    a sampled invariant self-check — not left to the model's memory. Both the AI and the developer are assumed
+    fallible; the system is built to catch errors on both sides.
+  </p>
+
+  <footer>
+    <p>
+      Source &amp; full protocol: <a href="https://github.com/AlexShchuka/neuro-matrix">github.com/AlexShchuka/neuro-matrix</a>
+      &nbsp;·&nbsp; &copy; 2026 Aleksandr Shchuka &nbsp;·&nbsp; Apache-2.0
+    </p>
+  </footer>
+</body>
+</html>
