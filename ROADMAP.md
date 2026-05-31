@@ -29,7 +29,7 @@ Each item is anchored to a concrete repo location, confirmed by tool output.
 | # | Item | Anchor | Landed |
 |---|---|---|---|
 | S1 | Verification gate — the verification half of an EviBound-style dual gate, complementing the approval gate (`auto-critic.sh`) | `scripts/verification-gate.sh`; vector R33 | PR #1 (open) |
-| S2 | Discoverability enablers — installable + directory-listable marketplace manifest, README/landing SEO+GEO, `llms.txt`, Apache-2.0 license | `.claude-plugin/marketplace.json`, `docs/index.html`, `llms.txt`, `LICENSE` | this PR |
+| S2 | Discoverability enablers — installable + directory-listable marketplace manifest, README/landing SEO+GEO, `llms.txt`, PolyForm Noncommercial 1.0.0 license | `.claude-plugin/marketplace.json`, `docs/index.html`, `llms.txt`, `LICENSE` | this PR |
 
 ## Discoverability — maintainer actions (not automatable in a PR)
 

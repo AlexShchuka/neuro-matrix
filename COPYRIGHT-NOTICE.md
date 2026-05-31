@@ -1,14 +1,14 @@
 # Copyright notice
 
-© 2026 Aleksandr Shchuka. Licensed under the Apache License, Version 2.0 — see `LICENSE`.
+© 2026 Aleksandr Shchuka. Licensed under the PolyForm Noncommercial License 1.0.0 — see `LICENSE`.
 
 ## License
 
-License: **Apache-2.0** — see the [`LICENSE`](LICENSE) file.
+License: **PolyForm Noncommercial 1.0.0** (noncommercial use only) — see the [`LICENSE`](LICENSE) file.
 
-The work is open source under the Apache License, Version 2.0: you may use, modify, and redistribute it under those terms, which include an explicit patent grant and attribution/NOTICE requirements. The `LICENSE` file, together with this notice, governs use of the work.
+The work is **source-available** under the PolyForm Noncommercial License 1.0.0: you may use, modify, and redistribute it **for noncommercial purposes only**. The license permits any noncommercial purpose — including personal use (research, study, hobby projects) and use by charitable, educational, public-research, public-safety/health, environmental, and government institutions — and does not grant commercial use. The license includes a patent grant. It is deliberately **not** an OSI-approved open-source license, because it restricts commercial use. The `LICENSE` file, together with this notice, governs use of the work.
 
-Strategic / commercial arrangements (dual-licensing, trademark enforcement) may be addressed separately later; they do not retract the Apache-2.0 grant on code as published.
+Commercial use is **not** granted by this license. A separate commercial license may be offered later; until then, commercial use requires the author's prior written permission.
 
 ## Authorship and provenance
 
