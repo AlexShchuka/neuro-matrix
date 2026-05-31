@@ -2,7 +2,7 @@
 
 Single source of truth for external references that underpin the plugin's protocol. References live here as plain identifiers (not URLs); freshness metadata tracks which anchors are verified vs pending vs deprecated without re-googling.
 
-The catalog is a standalone registry. The `Used in` column maps each row to layer numbers (L1–L10), meta-axiom numbers, and R-vector numbers from a separate development-roadmap document maintained outside this repository; these identifiers are forward-references — a roadmap row may not exist yet, but the anchor stands on its own as a source citation.
+The catalog is a standalone registry. The `Used in` column maps each row to layer numbers (L1–L10), meta-axiom numbers, and R-vector numbers tracked in the in-repo roadmap (`ROADMAP.md`); these identifiers are forward-references — a roadmap row may not exist yet, but the anchor stands on its own as a source citation.
 
 ## Row format
 
@@ -15,15 +15,15 @@ The catalog is a standalone registry. The `Used in` column maps each row to laye
 | **Status** | `active` — read in-thread, claim verified against source. `pending-verification` — cited but not yet verified in-thread. `deprecated` — retracted, superseded, or otherwise no longer load-bearing. |
 | **Added** | YYYY-MM-DD — when the anchor entered the catalog. |
 | **Last-verified** | YYYY-MM-DD — when the anchor was last fetched and the cited claim re-checked. `—` if never verified in-thread. |
-| **Used in** | L-layer numbers (L1–L10), meta-axiom numbers, or R-vector numbers (R1–R37 and growing) tracked in a separate development-roadmap document; or a protocol-file section if used outside the roadmap. |
+| **Used in** | L-layer numbers (L1–L10), meta-axiom numbers, or R-vector numbers (R1–R37 and growing) tracked in the in-repo roadmap (`ROADMAP.md`); or a protocol-file section / script path if used outside the roadmap. |
 
 ## Maintenance cadence
 
 - **Quarterly review.** Walk the table; for every row with `Last-verified` empty or older than 90 days, attempt in-thread verification (fetch abstract, re-check the specific claim used in the citing layer). Update `Last-verified` to the review date if the claim still stands; flip `Status → deprecated` if retracted / superseded.
 - **On every new anchor.** Add a row with `Status: pending-verification`, `Added: <today>`, `Last-verified: —`. The first in-thread verification flips status to `active`.
 - **On deprecation.** Do NOT delete the row; set `Status: deprecated` and append `Replaced-by: <id>` if a newer anchor replaces it. Preserves history for re-evaluation.
-- **On layer addition.** When a new L-layer or R-vector is added to the external roadmap, its anchors land here first, then the roadmap cites by ID.
-- **Automation candidate.** A periodic script can walk this table, query arXiv abstracts to detect retraction notices and bump dates, surface stale entries to the maintainer (R24 in the external roadmap).
+- **On layer addition.** When a new L-layer or R-vector is added to `ROADMAP.md`, its anchors land here first, then the roadmap cites by ID.
+- **Automation candidate.** A periodic script can walk this table, query arXiv abstracts to detect retraction notices and bump dates, surface stale entries to the maintainer (R24 in `ROADMAP.md`).
 
 ## Catalog
 
@@ -117,10 +117,12 @@ The catalog is a standalone registry. The `Used in` column maps each row to laye
 
 | ID | Title | Year | Type | Status | Added | Last-verified | Used in |
 |---|---|---|---|---|---|---|---|
-| arXiv:2511.05524 | EviBound — Dual Governance Gates (Approval + Verification) | 2025 | preprint | pending-verification | 2026-05-25 | — | R33 |
-| arXiv:2604.08401 | SAVeR — Self-Audited Verified Reasoning before commit | 2026 | preprint | pending-verification | 2026-05-25 | — | R33 |
+| arXiv:2511.05524 | EviBound — Dual Governance Gates (Approval + Verification) | 2025 | preprint | active | 2026-05-25 | 2026-05-31 | R33, scripts/verification-gate.sh |
+| arXiv:2604.08401 | SAVeR — Self-Audited Verified Reasoning before commit | 2026 | preprint | active | 2026-05-25 | 2026-05-31 | R33, scripts/verification-gate.sh |
 | arXiv:2603.13189 | CMAG — Constitutional Multi-Agent Governance (hard + soft constraints, ECS metric) | 2026 | preprint | pending-verification | 2026-05-25 | — | R33 |
 | arXiv:2505.15182 | ReflAct — Goal-State Reflection for agentic loops | 2025 | preprint | pending-verification | 2026-05-25 | — | R33 |
+
+> **In-thread verification (2026-05-31), operationalized in `scripts/verification-gate.sh`.** EviBound (`arXiv:2511.05524`, *Evidence-Bound Autonomous Research: A Governance Framework for Eliminating False Claims*) reports a pre-execution **Approval Gate** + post-execution **Verification Gate**; measured hallucination (claimed-but-unverified completion): approval/prompt-level-only ≈ 100% (8/8 claimed, 0/8 verified), verification-only ≈ 25%, dual gate → **0%** at ≈ 8.3% execution overhead. SAVeR (`arXiv:2604.08401`, *Verify Before You Commit: Towards Faithful Reasoning in LLM Agents via Self-Auditing*) frames the commit boundary as self-auditing belief-states before action commitment. These two figures back the `active` / `Last-verified: 2026-05-31` rows above and the result numbers cited in `README.md`, `invariants.txt`, and the script header.
 
 ### MCP trust + memory governance — used by R30, R31 (2026-05 additions)
 
