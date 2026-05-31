@@ -2,7 +2,7 @@
 
 A Claude Code plugin that calibrates an AI + developer co-system on common sense, scientific method, and Nash-equilibrium cooperation. Agents, hooks, an invariant-driven self-check, and a held-out evaluation harness.
 
-**What it is:** an anti-hallucination (&laquo;anti-neuroslop&raquo;) **harness for Claude Code** — runtime **invariants** with a per-turn self-check, deterministic **hooks**, four review **agents** (developer · analyzer · critic · epistemic-auditor), a dual approval+verification gate, and a held-out **evaluation harness** that keep AI-assisted coding and code review anchored to reality. *Topics: Claude Code plugin, AI agents, prompt engineering, LLM evaluation, AI code review, hooks, agentic, AI safety.*
+**What it is:** an anti-hallucination (&laquo;anti-neuroslop&raquo;) **harness for Claude Code** — runtime **invariants** with a per-turn self-check, deterministic **hooks**, four **agents** (developer · analyzer · critic · epistemic-auditor), a dual approval+verification gate, and a held-out **evaluation harness** that keep AI-assisted coding and code review anchored to reality. *Topics: Claude Code plugin, AI agents, prompt engineering, LLM evaluation, AI code review, hooks, agentic, AI safety.*
 
 ## Install
 
@@ -114,4 +114,4 @@ The eval harness — paired Wilcoxon + bootstrap CI on Cohen's d + McNemar one-s
 
 ## Copyright
 
-© 2026 Aleksandr Shchuka. All rights reserved. License: TBD — see `COPYRIGHT-NOTICE.md`.
+© 2026 Aleksandr Shchuka. Licensed under Apache-2.0 — see `LICENSE` and `COPYRIGHT-NOTICE.md`.

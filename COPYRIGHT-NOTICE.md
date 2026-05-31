@@ -1,6 +1,6 @@
 # Copyright notice
 
-© 2026 Aleksandr Shchuka. All rights reserved.
+© 2026 Aleksandr Shchuka. Licensed under the Apache License, Version 2.0 — see `LICENSE`.
 
 ## License
 
