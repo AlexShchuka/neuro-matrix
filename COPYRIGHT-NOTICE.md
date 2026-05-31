@@ -4,11 +4,11 @@
 
 ## License
 
-License: **TBD** — not yet selected.
+License: **Apache-2.0** — see the [`LICENSE`](LICENSE) file.
 
-Until a license is committed to this repository, **no rights are granted** to copy, modify, redistribute, or use this work beyond what is explicitly permitted by GitHub's Terms of Service for viewing the source.
+The work is open source under the Apache License, Version 2.0: you may use, modify, and redistribute it under those terms, which include an explicit patent grant and attribution/NOTICE requirements. The `LICENSE` file, together with this notice, governs use of the work.
 
-A future commit will add a `LICENSE` file declaring the applicable terms (e.g. MIT, Apache 2.0, or a dual-license arrangement). When that file appears, it — together with this notice — governs use of the work.
+Strategic / commercial arrangements (dual-licensing, trademark enforcement) may be addressed separately later; they do not retract the Apache-2.0 grant on code as published.
 
 ## Authorship and provenance
 

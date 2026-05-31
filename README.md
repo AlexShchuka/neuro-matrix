@@ -2,6 +2,17 @@
 
 A Claude Code plugin that calibrates an AI + developer co-system on common sense, scientific method, and Nash-equilibrium cooperation. Agents, hooks, an invariant-driven self-check, and a held-out evaluation harness.
 
+**What it is:** an anti-hallucination (&laquo;anti-neuroslop&raquo;) **harness for Claude Code** — runtime **invariants** with a per-turn self-check, deterministic **hooks**, four review **agents** (developer · analyzer · critic · epistemic-auditor), a dual approval+verification gate, and a held-out **evaluation harness** that keep AI-assisted coding and code review anchored to reality. *Topics: Claude Code plugin, AI agents, prompt engineering, LLM evaluation, AI code review, hooks, agentic, AI safety.*
+
+## Install
+
+```text
+/plugin marketplace add AlexShchuka/neuro-matrix
+/plugin install neuro-matrix@neuro-matrix
+```
+
+Requires [Claude Code](https://code.claude.com). On install the protocol activates: a risk-weighted invariant self-check each turn, cycle / critic / verification hooks on mutations, and four sub-agents for analysis, code, review, and epistemic audit.
+
 The operating protocol lives in `CLAUDE.md`. This README answers four questions: **why, on what concepts, how to work as a team, and what the project is for.**
 
 The name is a nod to John Forbes Nash Jr. — payoff matrices in game theory, the mind matrices Nash drew on glass in *A Beautiful Mind*, and the neurodivergent cognitive style that powers systems thinking under uncertainty. A protocol that seeks its own equilibrium.
