@@ -117,10 +117,12 @@ The catalog is a standalone registry. The `Used in` column maps each row to laye
 
 | ID | Title | Year | Type | Status | Added | Last-verified | Used in |
 |---|---|---|---|---|---|---|---|
-| arXiv:2511.05524 | EviBound — Dual Governance Gates (Approval + Verification) | 2025 | preprint | pending-verification | 2026-05-25 | — | R33 |
-| arXiv:2604.08401 | SAVeR — Self-Audited Verified Reasoning before commit | 2026 | preprint | pending-verification | 2026-05-25 | — | R33 |
+| arXiv:2511.05524 | EviBound — Dual Governance Gates (Approval + Verification) | 2025 | preprint | active | 2026-05-25 | 2026-05-31 | R33, scripts/verification-gate.sh |
+| arXiv:2604.08401 | SAVeR — Self-Audited Verified Reasoning before commit | 2026 | preprint | active | 2026-05-25 | 2026-05-31 | R33, scripts/verification-gate.sh |
 | arXiv:2603.13189 | CMAG — Constitutional Multi-Agent Governance (hard + soft constraints, ECS metric) | 2026 | preprint | pending-verification | 2026-05-25 | — | R33 |
 | arXiv:2505.15182 | ReflAct — Goal-State Reflection for agentic loops | 2025 | preprint | pending-verification | 2026-05-25 | — | R33 |
+
+> **In-thread verification (2026-05-31), operationalized in `scripts/verification-gate.sh`.** EviBound (`arXiv:2511.05524`, *Evidence-Bound Autonomous Research: A Governance Framework for Eliminating False Claims*) reports a pre-execution **Approval Gate** + post-execution **Verification Gate**; measured hallucination (claimed-but-unverified completion): approval/prompt-level-only ≈ 100% (8/8 claimed, 0/8 verified), verification-only ≈ 25%, dual gate → **0%** at ≈ 8.3% execution overhead. SAVeR (`arXiv:2604.08401`, *Verify Before You Commit: Towards Faithful Reasoning in LLM Agents via Self-Auditing*) frames the commit boundary as self-auditing belief-states before action commitment. These two figures back the `active` / `Last-verified: 2026-05-31` rows above and the result numbers cited in `README.md`, `invariants.txt`, and the script header.
 
 ### MCP trust + memory governance — used by R30, R31 (2026-05 additions)
 

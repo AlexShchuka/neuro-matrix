@@ -59,7 +59,8 @@ The protocol is designed under two formal lenses.
 
 - `scripts/random-invariant.sh` — samples one invariant each turn for extra rigor.
 - `scripts/cycle-detector.sh` — blocks `Bash` / `Edit` / `Write` / `MultiEdit` / `NotebookEdit` if the same tool + input was used three times in a row.
-- `scripts/auto-critic.sh` — blocks `git commit` and MR-creation tools until `@critic` returns approve.
+- `scripts/auto-critic.sh` — **approval gate**: blocks `git commit` and MR-creation tools until `@critic` returns approve.
+- `scripts/verification-gate.sh` — **verification gate**: on `git commit`, runs machine-checkable evidence on the staged artifacts (`bash -n` for shell, `ast.parse` for Python, `jq empty` for JSON) and blocks the commit if any fails. Approval is necessary but not sufficient; this is the post-execution half of an EviBound-style dual gate (`arXiv:2511.05524` — approval-only ≈ 100% false-completion, verification-only ≈ 25%, dual gate → 0%).
 - `scripts/self-review-preflight.sh` — on critical-review prompts, emits a reading-list reminder to prevent inverted sycophancy.
 
 ## 3. How to work with the AI as a team
