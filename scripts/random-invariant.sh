@@ -5,7 +5,10 @@
 #   - deontic modality [O|P|F] (obligation/permission/forbidden), when present after the
 #     risk tag, is surfaced in the self-check block so the agent applies the right kind
 #     of duty (must-do vs context-dependent vs must-not-do).
-# Lines starting with `#` are treated as comments and skipped.
+# Each invariant begins with a stable id token "#N" (see invariants.txt header). The id is
+# stripped before parsing the [risk] [deontic] tags and kept in the displayed line so the
+# self-check cites the invariant by id. Only prose comments ("# " — hash + space) are skipped;
+# "#N " id-lines are invariants, not comments.
 
 set -euo pipefail
 
@@ -15,13 +18,30 @@ if [[ ! -f "$INVARIANTS" ]]; then
   exit 0
 fi
 
-declare -A W=([critical]=3 [important]=2 [style]=1)
-declare -A DEONTIC_NAME=([O]="obligation" [P]="permission" [F]="forbidden")
-declare -A DEONTIC_NOTE=(
-  [O]="applying is required; not applying is a defect"
-  [P]="context-dependent; default to applying, deviate with explicit reason"
-  [F]="doing the action is a defect"
-)
+# Case maps (not `declare -A`) so the script runs on the macOS default bash 3.2.
+risk_weight() {
+  case "$1" in
+    critical) echo 3 ;;
+    important) echo 2 ;;
+    *) echo 1 ;;
+  esac
+}
+deontic_name() {
+  case "$1" in
+    O) echo "obligation" ;;
+    P) echo "permission" ;;
+    F) echo "forbidden" ;;
+    *) echo "" ;;
+  esac
+}
+deontic_note() {
+  case "$1" in
+    O) echo "applying is required; not applying is a defect" ;;
+    P) echo "context-dependent; default to applying, deviate with explicit reason" ;;
+    F) echo "doing the action is a defect" ;;
+    *) echo "" ;;
+  esac
+}
 declare -a LINES DEONTICS WEIGHTS
 total=0
 ln=0
@@ -29,15 +49,19 @@ ln=0
 while IFS= read -r line; do
   ln=$((ln + 1))
   [[ -z "$line" ]] && continue
-  [[ "$line" =~ ^[[:space:]]*# ]] && continue
+  # Skip prose comments ("# text") but NOT "#N " id-lines, which are invariants.
+  [[ "$line" =~ ^[[:space:]]*#[[:space:]] ]] && continue
+  # Strip the stable id prefix ("#N ") before tag parsing; keep $line intact for display.
+  body="$line"
+  [[ "$body" =~ ^#[0-9]+[[:space:]]+(.*)$ ]] && body="${BASH_REMATCH[1]}"
   deontic=""
-  if [[ "$line" =~ ^\[([a-z]+)\][[:space:]]+\[([OPF])\] ]]; then
+  if [[ "$body" =~ ^\[([a-z]+)\][[:space:]]+\[([OPF])\] ]]; then
     risk="${BASH_REMATCH[1]}"
     deontic="${BASH_REMATCH[2]}"
-    w="${W[$risk]:-1}"
-  elif [[ "$line" =~ ^\[([a-z]+)\] ]]; then
+    w="$(risk_weight "$risk")"
+  elif [[ "$body" =~ ^\[([a-z]+)\] ]]; then
     risk="${BASH_REMATCH[1]}"
-    w="${W[$risk]:-1}"
+    w="$(risk_weight "$risk")"
   else
     w=1
     printf 'random-invariant: warning: untagged line %d sampled at style-weight (fallback); add [critical|important|style] prefix\n' "$ln" >&2
@@ -49,6 +73,11 @@ while IFS= read -r line; do
 done < "$INVARIANTS"
 
 if [[ "$total" -eq 0 ]]; then
+  # Fail loud, do not block: an empty parse means invariants.txt is malformed (e.g. every
+  # line skipped) and the per-turn self-check would silently vanish. Surface it; let the
+  # prompt through (graceful degradation, matching the cycle-detector "never block on
+  # parser failure" stance).
+  printf 'random-invariant: warning: no invariants parsed from %s — self-check skipped this turn; check the file format.\n' "$INVARIANTS" >&2
   exit 0
 fi
 
@@ -71,8 +100,8 @@ fi
 
 deontic_text=""
 if [[ -n "$DEONTIC" ]]; then
-  name="${DEONTIC_NAME[$DEONTIC]:-}"
-  note="${DEONTIC_NOTE[$DEONTIC]:-}"
+  name="$(deontic_name "$DEONTIC")"
+  note="$(deontic_note "$DEONTIC")"
   deontic_text="This invariant's deontic class: ${DEONTIC} (${name}) — ${note}."
 fi
 

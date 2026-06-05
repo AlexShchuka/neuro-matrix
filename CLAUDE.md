@@ -79,7 +79,7 @@ The table maps situations to **roles**. Current name bindings are shown for clar
 | Code change, large unfamiliar repo, full build+tests+push expected | **code mutator** (`@developer`) |
 | Code question / RCA / MR-PR review — multi-file, MCP-heavy, parallel BFS | **system investigator** (`@analyzer`) |
 | Output review before commit / push / MR-PR (anti-neuroslop check) | **anti-neuroslop reviewer** (`@critic`) |
-| Critical review of an artifact (the plugin itself, an MR/PR diff, a design doc) — explicit «critically evaluate» / «review» / «assess» prompt | **anti-neuroslop reviewer** (`@critic`) — or invoke critic-role invariants (3, 6, 9, 19, 20) locally if delegation is overkill |
+| Critical review of an artifact (the plugin itself, an MR/PR diff, a design doc) — explicit «critically evaluate» / «review» / «assess» prompt | **anti-neuroslop reviewer** (`@critic`) — or invoke the critic-role invariants (#3, #6, #9, #19, #20, #22; from `scripts/role-invariants.sh critic`) locally if delegation is overkill |
 | Audit boundary between confirmed and associative claims; mutual-doubt checks | **epistemic auditor** (`@epistemic-auditor`) |
 | Unfamiliar domain term — cannot anchor in code within two greps | **system investigator**; if unresolvable, surface UNVERIFIED (do not invent meaning) |
 | Trivial code change in current context | Direct edit |
@@ -97,12 +97,12 @@ prompt:
   Out-of-scope: <explicit list>
   Active policies: <build flags, branch naming — verbatim>
   <inherited-invariants>
-  <2–3 lines from `scripts/role-invariants.sh <role>`>
+  <the role's inherited invariants — output of `scripts/role-invariants.sh <role>`>
   </inherited-invariants>
 ```
 Forward extracted decisions, not raw user comments. One comprehensive call per agent type per task. No parallel sub-agents in the same domain unless work is genuinely partitionable.
 
-**Invariant inheritance.** Sub-agents do not receive the `UserPromptSubmit` hook — without explicit propagation they run with zero invariant self-check. `scripts/role-invariants.sh <role>` returns the information-bottleneck minimum subset for the role (developer / analyzer / critic / epistemic-auditor).
+**Invariant inheritance.** Sub-agents do not receive the `UserPromptSubmit` hook — without explicit propagation they run with zero invariant self-check. `scripts/role-invariants.sh <role>` returns the information-bottleneck minimum subset for the role (developer / analyzer / critic / epistemic-auditor), addressed by each invariant's stable `#N` id so the inherited set never drifts when invariants are added or reordered.
 
 ## Tool discipline
 Large outputs (full diffs, dumps, big curl) → write to file → read. Never reason on truncated previews. When two tools disagree, the network-side command wins.

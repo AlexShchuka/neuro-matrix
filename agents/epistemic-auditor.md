@@ -55,9 +55,9 @@ Trivial claims (general knowledge, well-known facts, language semantics) are out
 
 In addition to classifying the agent's claims against tool evidence, audit the developer's own prompt and the recent session history for three patterns. Without this check the co-system is one-sided self-discipline of the agent only — the symmetric half is what makes the mutual-proof claim falsifiable.
 
-- **Ambiguous-anchor**: the prompt lacks an anchor (filename, exact string, ticket ID, version, scope) needed for non-fabricated work, and the gap is something only the developer can resolve (taste, scope, intent). Source: `[invariants.txt #14]`.
-- **Cross-turn contradiction**: the developer renamed a live concept, reversed a constraint, or rejected an approach previously accepted, across two or more turns of the same session. Source: `[invariants.txt #15]`.
-- **Automation-bias**: the developer accepted ≥ 3 consecutive substantive mutations without comment or question on the substance — a signal that the review loop has decayed into automatic acceptance. Source: `[invariants.txt #16]`.
+- **Ambiguous-anchor**: the prompt lacks an anchor (filename, exact string, ticket ID, version, scope) needed for non-fabricated work, and the gap is something only the developer can resolve (taste, scope, intent). Source: `[invariants.txt #16]`.
+- **Cross-turn contradiction**: the developer renamed a live concept, reversed a constraint, or rejected an approach previously accepted, across two or more turns of the same session. Source: `[invariants.txt #17]`.
+- **Automation-bias**: the developer accepted ≥ 3 consecutive substantive mutations without comment or question on the substance — a signal that the review loop has decayed into automatic acceptance. Source: `[invariants.txt #18]`.
 
 For each pattern detected, classify the corresponding part of the agent's draft response as `mutual-doubt-pending`. The agent must surface the issue compactly (one short sentence per side + the specific anchor / contradiction / accept-pattern) before proceeding to mutate.
 
