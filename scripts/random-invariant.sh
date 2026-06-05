@@ -5,10 +5,6 @@
 #   - deontic modality [O|P|F] (obligation/permission/forbidden), when present after the
 #     risk tag, is surfaced in the self-check block so the agent applies the right kind
 #     of duty (must-do vs context-dependent vs must-not-do).
-# Each invariant begins with a stable id token "#N" (see invariants.txt header). The id is
-# stripped before parsing the [risk] [deontic] tags and kept in the displayed line so the
-# self-check cites the invariant by id. Only prose comments ("# " — hash + space) are skipped;
-# "#N " id-lines are invariants, not comments.
 
 set -euo pipefail
 
@@ -18,7 +14,6 @@ if [[ ! -f "$INVARIANTS" ]]; then
   exit 0
 fi
 
-# Case maps (not `declare -A`) so the script runs on the macOS default bash 3.2.
 risk_weight() {
   case "$1" in
     critical) echo 3 ;;
@@ -49,9 +44,7 @@ ln=0
 while IFS= read -r line; do
   ln=$((ln + 1))
   [[ -z "$line" ]] && continue
-  # Skip prose comments ("# text") but NOT "#N " id-lines, which are invariants.
   [[ "$line" =~ ^[[:space:]]*#[[:space:]] ]] && continue
-  # Strip the stable id prefix ("#N ") before tag parsing; keep $line intact for display.
   body="$line"
   [[ "$body" =~ ^#[0-9]+[[:space:]]+(.*)$ ]] && body="${BASH_REMATCH[1]}"
   deontic=""
@@ -73,10 +66,6 @@ while IFS= read -r line; do
 done < "$INVARIANTS"
 
 if [[ "$total" -eq 0 ]]; then
-  # Fail loud, do not block: an empty parse means invariants.txt is malformed (e.g. every
-  # line skipped) and the per-turn self-check would silently vanish. Surface it; let the
-  # prompt through (graceful degradation, matching the cycle-detector "never block on
-  # parser failure" stance).
   printf 'random-invariant: warning: no invariants parsed from %s — self-check skipped this turn; check the file format.\n' "$INVARIANTS" >&2
   exit 0
 fi

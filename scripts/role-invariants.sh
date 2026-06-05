@@ -4,10 +4,8 @@
 # sub-agents do not receive the UserPromptSubmit hook, so the invariant self-check has to
 # travel with the prompt, explicitly.
 #
-# Selection: information-bottleneck — minimum subset whose semantic span covers the role's
-# typical failure modes (not the full pool). Invariants are addressed by their stable "#N" id
-# (matched with `grep "^#N "`), never by file line number — so adding, removing, or reordering
-# invariants never shifts a role's inherited set.
+# Selection: information-bottleneck — minimum subset covering the role's typical failure modes.
+# Invariants are addressed by stable "#N" id (grep "^#N "), never by file line.
 #
 # Roles:
 #   developer         — mutation gate, no-invention, evidence-paired claims
@@ -30,8 +28,6 @@ if [[ ! -f "$INVARIANTS" ]]; then
   exit 1
 fi
 
-# Role → stable invariant ids (the "#N" tokens in invariants.txt), not file line numbers.
-# A case map (not `declare -A`) so the script runs on the macOS default bash 3.2.
 KNOWN_ROLES="developer analyzer critic epistemic-auditor"
 role_invariants() {
   case "$1" in

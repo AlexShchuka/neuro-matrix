@@ -125,6 +125,8 @@ bash -n scripts/*.sh                              # shell syntax
 python3 -m py_compile eval/*.py scripts/*.py      # python parse
 jq empty hooks/hooks.json .claude-plugin/*.json   # json well-formed
 ```
+Hook scripts must run on the macOS default **bash 3.2** — avoid bash-4-only constructs (`declare -A`, `mapfile`). `invariants.txt` is addressed by each invariant's stable `#N` id (`grep "^#N "`), never by file line.
+
 **Eval** — required after any change to `CLAUDE.md`, `invariants.txt`, `agents/*`, or hook scripts (`eval/README.md`):
 ```bash
 python3 eval/run_suite.py --refs <baseline-ref>=baseline,HEAD=candidate \
