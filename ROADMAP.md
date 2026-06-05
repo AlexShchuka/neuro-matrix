@@ -18,10 +18,14 @@ Each item is anchored to a concrete repo location, confirmed by tool output.
 |---|---|---|---|---|
 | N1 | Stack scaffolds absent | `references/per-stack/` — referenced by `CLAUDE.md:68`, `agents/developer.md:39`, `agents/analyzer.md:44`; only a `README.md` ships | Agents are instructed to read per-stack rules before acting; without `<stack>.md` files the instruction has no target. | open |
 | N2 | No positive eval probes | `eval/questions/` holds only `README.md`; `eval/run_suite.py:87` globs `q*.md` → empty | The statistical harness (Wilcoxon / McNemar) has no positive set to run on; only adversarial probes exist. | open |
-| N3 | role-invariants index off-by-one | `scripts/role-invariants.sh:31` — `sed` reads file lines, but line 1 of `invariants.txt` is the header comment, so invariant #N sits on file line N+1 | Sub-agents inherit the wrong invariant lines under `<inherited-invariants>`. | open |
+| N3 | role-invariants index off-by-one | `scripts/role-invariants.sh` — `sed` read file lines, but line 1 of `invariants.txt` is the header comment, so invariant #N sat on file line N+1 | Sub-agents inherited the wrong invariant lines under `<inherited-invariants>`. | open |
 | N4 | Not installable via marketplace | repo root — no `.claude-plugin/marketplace.json` | Plugin cannot be added with `/plugin`; only manual / local load. | open |
 | N5 | Anchor freshness debt | `references/research-anchors.md` — most rows `pending-verification`, `Last-verified: —` | The quarterly-review cadence is defined but has not run; R24 is the automation candidate. | open |
+| N6 | Hard-prohibitions have no deterministic guard | `hooks/hooks.json`, `scripts/` — no `PreToolUse` hook blocks `git push` to main / `--force` / `--no-verify`; `invariants.txt #24` is advisory/sampler-only (not yet inherited by any role — see N8) | An irreversible shared-history action is guarded only by a low-probability weighted self-check and prose, not a deterministic gate. Add a `PreToolUse` red-line guard as the durable backstop. | open |
+| N7 | Verification gate covers only `sh`/`py`/`json` | `scripts/verification-gate.sh` (case block) | On compiled/typed stacks (C#, TS/TSX, Swift) the verification half of the dual gate no-ops, silently degrading to approval-only on the languages most projects ship — the regime EviBound measures at ≈25–100% false-completion. Add stack-aware checks (`tsc --noEmit`, `dotnet build`/`format --verify-no-changes`, `swift build`). | open |
+| N8 | Role subsets omit #23/#24/#25; analyzer not least-privilege | `scripts/role-invariants.sh` (subsets); `agents/analyzer.md`, `agents/developer.md` (no `tools:` field → inherit all tools) | The verification-gate (#23) and the new red-line (#24) / halt-on-contradiction (#25) invariants are inherited by no role; analyzer is documented non-mutating yet can `Edit`/`Write`/`Bash`. Curate the subsets and scope tools — calibration change, gate behind the eval suite. | open |
 
+(N3 — role-invariants off-by-one — shipped as S3 below.)
 (N4 — marketplace manifest — shipped as S2 below.)
 
 ## Shipped
@@ -30,6 +34,7 @@ Each item is anchored to a concrete repo location, confirmed by tool output.
 |---|---|---|---|
 | S1 | Verification gate — the verification half of an EviBound-style dual gate, complementing the approval gate (`auto-critic.sh`) | `scripts/verification-gate.sh`; vector R33 | PR #1 (open) |
 | S2 | Discoverability enablers — installable + directory-listable marketplace manifest, README/landing SEO+GEO, `llms.txt`, PolyForm Noncommercial 1.0.0 license | `.claude-plugin/marketplace.json`, `docs/index.html`, `llms.txt`, `LICENSE` | this PR |
+| S3 | Invariant-set integrity & coverage — stable `#N` ids addressed by `grep` (not file line), fixed role-inheritance off-by-one (N3) + stale cross-refs, deontic/Counter consistency (#15/#19/#23), and two new invariants (#24 hard-prohibitions, #25 halt-on-contradiction) | `invariants.txt`, `scripts/role-invariants.sh`, `scripts/random-invariant.sh`, `CLAUDE.md`, `agents/epistemic-auditor.md` | this PR (`alexshchuka/invariant-integrity-and-gaps`) |
 
 ## Discoverability — maintainer actions (not automatable in a PR)
 
