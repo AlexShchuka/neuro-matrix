@@ -45,21 +45,28 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
 # Collect candidate files: staged adds/copies/modifies, plus unstaged tracked
 # changes when the commit auto-stages them (`-a` / `--all`).
-mapfile -t FILES < <(git diff --staged --name-only --diff-filter=ACM 2>/dev/null)
+FILES=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && FILES+=("$line")
+done < <(git diff --staged --name-only --diff-filter=ACM 2>/dev/null)
 # Detect auto-stage: standalone `--all`, or any short-flag cluster containing `a`
 # (`-a`, `-am`, `-av`, `-amend` is NOT this — it is the long `--amend`, correctly excluded).
 if printf '%s' "$COMMAND" | grep -qE '(^|[[:space:]])(--all|-[a-zA-Z]*a[a-zA-Z]*)([[:space:]]|$)'; then
-  mapfile -t -O "${#FILES[@]}" FILES < <(git diff --name-only --diff-filter=ACM 2>/dev/null)
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && FILES+=("$line")
+  done < <(git diff --name-only --diff-filter=ACM 2>/dev/null)
 fi
 
 [[ "${#FILES[@]}" -gt 0 ]] || exit 0
 
-declare -A SEEN
+DEDUPED=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && DEDUPED+=("$line")
+done < <(printf '%s\n' "${FILES[@]}" | sort -u)
+
 FAILURES=()
 
-for f in "${FILES[@]}"; do
-  [[ -n "$f" && -z "${SEEN[$f]:-}" ]] || continue
-  SEEN["$f"]=1
+for f in "${DEDUPED[@]}"; do
   [[ -f "$f" ]] || continue
 
   case "$f" in
