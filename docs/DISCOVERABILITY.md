@@ -4,13 +4,11 @@ This repo now ships every discoverability **enabler** that lives in files (marke
 
 Legend: ☐ todo · ⭐ critical path (without these there is no visibility).
 
+> **Canonical maintainer-action list:** `ROADMAP.md` § "Discoverability — maintainer actions" is the authoritative checklist. This file keeps the press-kit / copy-paste blurbs; update both if adding new action items.
+
 ---
 
 ## 1. Critical path
-
-### ☐ ⭐ Merge the PRs to `main`
-The marketplace manifest only works — and community directories can only pick the repo up — once `.claude-plugin/marketplace.json` is on the **default branch**.
-- Merge order: **PR #6** (discoverability) → **PR #1** (dual gate + ROADMAP) → `main`. (PR #6 is stacked on PR #1; if you merge #1 first, retarget #6's base to `main`.)
 
 ### ☐ ⭐ Set the repo About + topics
 Repo home → the ⚙️ next to **About** (top-right).
