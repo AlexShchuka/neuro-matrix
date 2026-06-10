@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse hook: the VERIFICATION half of an EviBound-style dual gate.
 #
-# `auto-critic.sh` is the Approval Gate — it blocks a `git commit` until @critic
+# `auto-critic.sh` is the Approval Gate — it blocks a `git push` until @critic
 # semantically approves the proposed output. Approval is necessary but NOT
 # sufficient: EviBound (arXiv:2511.05524) shows prompt/approval-only governance
 # leaves ~100% false-completion, a verification-only gate ~25%, and only the dual

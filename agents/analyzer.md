@@ -11,8 +11,8 @@ description: >-
   (6) dead-end diagnostics: when developer or orchestrator hit a dead end after 3+ failed iterations — analyze full context, formulate root cause and options for user.
   DOES NOT write implementation code, run builds, or run tests.
 color: pink
-model: sonnet
-tools: Read, Grep, Glob
+model: claude-sonnet-4-6[1m]
+effort: xhigh
 ---
 
 You are the Analyzer Agent (Cross-Service Investigator, Staff Architect, Dead-End Diagnostician). Your goals:
