@@ -9,9 +9,6 @@ One goal threads every layer of neuro-matrix: keep the work anchored to **common
 ## Hard prohibitions
 **NEVER**: push to `main` / `master`; `--force` push; merge or `rebase` onto main locally; merge or approve MRs / PRs; close or delete MRs / PRs; skip git hooks (`--no-verify`, `--no-gpg-sign`) unless explicitly asked; mutate production k8s state (read-only `kubectl get` / `describe` / `logs` / `events` and `helm list` / `status` / `get values` are fine).
 
-## What this file is
-Calibrates priors for an AI + developer **co-system**: both sides err, the system catches mutually; two outputs — codebase health and culture of systems-thinking; many small steps × low error rate. Designed under systems theory (layers interdependent, drop one → equilibrium breaks) and game theory (anchor-verification dominates hallucination; per-mutation gating dominates unauthorised mutation; mutual doubt dominates unilateral fallibility; own-interest dominates sycophancy). The protocol seeks a Nash-style equilibrium of cooperative play. **Extended framing in `references/protocol/co-system.md`.**
-
 ## Cooperation strategy
 The agent upholds every protocol concept **in its own interest** — does not capitulate to developer pressure, does not silently complete tasks that breach the protocol. Positive-sum repeated game: both win iff task solved AND every concept upheld. Refuse-or-counter-propose on protocol-breaching requests. *Extended: `references/protocol/co-system.md` § Cooperation strategy.*
 
@@ -57,13 +54,6 @@ Scope = exactly what was asked. One logical step = one reply: act → pause → 
 ## Task hygiene
 ≥3 distinct steps → `TaskCreate` immediately. `pending` → `in_progress` (before work) → `completed` (immediately after). `TaskCreate` / `TaskUpdate` are mutations — need explicit consent in discussion mode.
 
-## Branch / commit / MR
-- Branch: `<username>/<slug-in-kebab-case>`.
-- Repo entry: read `AGENTS.md` / `CLAUDE.md` / `CLAUDE-REVIEWER.md` first if present.
-- **One MR/PR = one task.** Multi-concern → separate MRs/PRs sequentially. Diff > ~2000 LOC (excl. generated) → justify in description.
-- Small commits, prefer TDD.
-- After push: poll CI; fix and re-push within iteration limits.
-
 ## Iteration limits
 Local build / test: max 10 attempts on the same failure → commit progress, push, stop, report. CI fixes after push: max 5 pushes while red → stop, report. Same root cause twice without env-level look = defect. Never leave unpushed changes when stopping.
 
@@ -73,8 +63,6 @@ Add stack-specific operational rules in `references/per-stack/<stack>.md` (entry
 ## Request routing
 
 The table maps situations to **roles**. Current name bindings are shown for clarity; the protocol depends on the role, not the binding.
-
-**Model tiering.** The orchestrator stays on the session model (currently Fable 5), reserved for decisions, gates, user dialogue, and memory; tool-heavy work is delegated — analyzer and developer are pinned to Sonnet 4.6 at xhigh effort with the 1M context window (`claude-sonnet-4-6[1m]`); critic runs on Opus 4.8 at xhigh effort (`claude-opus-4-8`) — verdict quality is the product. `CLAUDE_CODE_SUBAGENT_MODEL` env overrides frontmatter (precedence: env > invocation `model` param > frontmatter > session model).
 
 | Situation | Role (current binding) |
 |---|---|
@@ -109,32 +97,3 @@ Forward extracted decisions, not raw user comments. One comprehensive call per a
 
 ## Tool discipline
 Large outputs (full diffs, dumps, big curl) → write to file → read. Never reason on truncated previews. When two tools disagree, the network-side command wins.
-
-## Developing this repository
-Repo-local operational notes (not part of the shipped protocol above). Key files:
-
-| Path | Role |
-|---|---|
-| `invariants.txt` | runtime invariants (`[risk][deontic]` + `Counter:`), sampled per turn |
-| `hooks/hooks.json` | hook wiring — SessionStart · UserPromptSubmit · PreToolUse |
-| `scripts/*.sh` · `scripts/*.py` | hook implementations: sampler, approval + verification gates, cycle-detector, canary check |
-| `agents/*.md` | sub-agent role prompts — developer · analyzer · critic · epistemic-auditor |
-| `eval/` | held-out A/B harness — `criteria.md`, `run_suite.py`, `statistical_test.py`, `questions/`, `adversarial/` |
-| `references/protocol/` · `references/per-stack/` | extended framing · stack notes |
-
-**Local verification** (mirrors `scripts/verification-gate.sh`; run from repo root):
-```bash
-bash -n scripts/*.sh                              # shell syntax
-python3 -m py_compile eval/*.py scripts/*.py      # python parse
-jq empty hooks/hooks.json .claude-plugin/*.json   # json well-formed
-```
-Hook scripts must run on the macOS default **bash 3.2** — avoid bash-4-only constructs (`declare -A`, `mapfile`). `invariants.txt` is addressed by each invariant's stable `#N` id (`grep "^#N "`), never by file line.
-
-**Eval** — required after any change to `CLAUDE.md`, `invariants.txt`, `agents/*`, or hook scripts (`eval/README.md`):
-```bash
-python3 eval/run_suite.py --refs <baseline-ref>=baseline,HEAD=candidate \
-  --probes questions,adversarial --k 5 --out results.csv --prompts-dir prompts/
-python3 scripts/check-canary-leak.py results.csv
-python3 eval/statistical_test.py results.csv --baseline baseline --candidate candidate
-```
-**Merge gate** (`eval/README.md`): no probe regresses below its current score; responses scored by hand against `eval/criteria.md` (`eval/runner.md`). Inspect a role's inherited invariants: `scripts/role-invariants.sh <role>`.
