@@ -13,7 +13,7 @@ description: >-
   (6) run tests after successful build;
   (7) frontend changes via existing project conventions.
 color: blue
-model: claude-sonnet-4-6[1m]
+model: sonnet
 effort: xhigh
 ---
 
