@@ -82,6 +82,7 @@ The table maps situations to **roles**. Current name bindings are shown for clar
 ```
 subagent_type: <specific>
 description: <brief>
+model: sonnet            # OMIT when the agent's definition pins its own model — a per-call value overrides frontmatter
 prompt:
   Goal: <one line>
   Inputs the agent cannot derive: <paths, SHAs, exact symbols, blockers>

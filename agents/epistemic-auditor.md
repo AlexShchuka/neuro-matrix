@@ -9,6 +9,7 @@ description: >-
   or third-party systems. DOES NOT write implementation.
 color: yellow
 model: sonnet
+effort: xhigh
 tools: Read, Grep, Glob
 ---
 
