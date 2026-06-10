@@ -17,8 +17,13 @@
 # Marker mechanics: single-use, TTL 5 min, consumed on use — every subsequent push /
 # MR-create needs a fresh critic pass.
 #
-# Bypass for small fixups: `touch ~/.claude-critic-approved && <command>`. Use intentionally,
-# the risk is on the developer.
+# One-liner form: a gated command that STARTS with the literal `touch ~/.claude-critic-approved &&`
+# (leading whitespace tolerated, exact literal otherwise) is allowed directly — the marker check
+# runs before the command executes, so the chain's own touch can never satisfy it (issue #15).
+# Serves both the post-approve re-run and the intentional small-fixup bypass; the risk of a
+# critic-less bypass is on the developer. Side effect: the chain's touch leaves a fresh marker
+# behind, so one more gated command inside the TTL would pass without a new critic verdict —
+# follow a bypass with a normal critic-gated flow, don't stack bypasses.
 
 set -euo pipefail
 
@@ -40,6 +45,15 @@ fi
 [[ "$matches" -eq 1 ]] || exit 0
 
 MARKER="${HOME}/.claude-critic-approved"
+
+# One-liner allow (#15): the leading literal marker-touch IS the signal — at hook time the
+# chain's touch has not run yet, so the file check below could never see it. Consume any
+# pre-existing marker so a bypass does not stack on top of an earlier approval.
+if printf '%s' "$COMMAND" | grep -qE '^[[:space:]]*touch[[:space:]]+~/\.claude-critic-approved[[:space:]]*&&'; then
+  rm -f "$MARKER"
+  exit 0
+fi
+
 if [[ -f "$MARKER" ]]; then
   NOW=$(date +%s)
   MTIME=$(stat -c %Y "$MARKER" 2>/dev/null || stat -f %m "$MARKER" 2>/dev/null || echo "$NOW")
@@ -62,9 +76,9 @@ auto-critic: a mandatory critic check is required before this mutation.
    in the current environment, fall back to `general-purpose` with the body of `agents/critic.md`
    as the system-prompt template. The role contract is stable; the binding is not.
 
-2. If critic returns `approve`:
-       touch ~/.claude-critic-approved
-       <re-run the original command>
+2. If critic returns `approve`, re-run with the marker-touch leading the SAME command:
+       touch ~/.claude-critic-approved && <re-run the original command>
+   (running the touch as a separate command first also works)
 
 3. If critic returns `fix-required` — address the flagged items first, then loop again from step 1.
 
