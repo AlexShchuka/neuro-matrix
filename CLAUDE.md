@@ -74,16 +74,19 @@ Add stack-specific operational rules in `references/per-stack/<stack>.md` (entry
 
 The table maps situations to **roles**. Current name bindings are shown for clarity; the protocol depends on the role, not the binding.
 
+**Model tiering.** The orchestrator stays on the session model (currently Fable 5), reserved for decisions, gates, user dialogue, and memory; tool-heavy work is delegated — analyzer and developer are pinned to Sonnet 4.6 at xhigh effort with the 1M context window (`claude-sonnet-4-6[1m]`); critic runs on Opus 4.8 at xhigh effort (`claude-opus-4-8`) — verdict quality is the product. `CLAUDE_CODE_SUBAGENT_MODEL` env overrides frontmatter (precedence: env > invocation `model` param > frontmatter > session model).
+
 | Situation | Role (current binding) |
 |---|---|
 | Code change, large unfamiliar repo, full build+tests+push expected | **code mutator** (`@developer`) |
 | Code question / RCA / MR-PR review — multi-file, MCP-heavy, parallel BFS | **system investigator** (`@analyzer`) |
-| Output review before commit / push / MR-PR (anti-neuroslop check) | **anti-neuroslop reviewer** (`@critic`) |
+| Output review before push / MR-PR — the full branch diff, not per-commit (anti-neuroslop check) | **anti-neuroslop reviewer** (`@critic`) |
 | Critical review of an artifact (the plugin itself, an MR/PR diff, a design doc) — explicit «critically evaluate» / «review» / «assess» prompt | **anti-neuroslop reviewer** (`@critic`) — or invoke the critic-role invariants (#3, #6, #9, #19, #20, #22; from `scripts/role-invariants.sh critic`) locally if delegation is overkill |
 | Audit boundary between confirmed and associative claims; mutual-doubt checks | **epistemic auditor** (`@epistemic-auditor`) |
 | Unfamiliar domain term — cannot anchor in code within two greps | **system investigator**; if unresolvable, surface UNVERIFIED (do not invent meaning) |
+| Any step expected to take ≥3 tool calls (bulk read / search / build loops) | matching role agent — forced, invariant #26. Exceptions stay orchestrator-side: mutation gate / critic-marker flow, AskUserQuestion, memory writes; the «When NOT to delegate» list stays direct. |
 | Trivial code change in current context | Direct edit |
-| Code question / RCA — local, narrow | Direct `Read` / `Grep` |
+| Code question / RCA — local, narrow (<3 tool calls) | Direct `Read` / `Grep` |
 
 **Binding fallback.** If a role's `subagent_type` is not registered in the current environment, invoke `general-purpose` with the body of `agents/<name>.md` as system-prompt template. The role contract is stable; the binding is not.
 

@@ -70,7 +70,7 @@ The protocol is designed under two formal lenses.
 
 - `scripts/random-invariant.sh` — samples one invariant each turn for extra rigor.
 - `scripts/cycle-detector.sh` — blocks `Bash` / `Edit` / `Write` / `MultiEdit` / `NotebookEdit` if the same tool + input was used three times in a row.
-- `scripts/auto-critic.sh` — **approval gate**: blocks `git commit` and MR-creation tools until `@critic` returns approve.
+- `scripts/auto-critic.sh` — **approval gate**: blocks `git push` and MR-creation tools until `@critic` returns approve.
 - `scripts/verification-gate.sh` — **verification gate**: on `git commit`, runs machine-checkable evidence on the staged artifacts (`bash -n` for shell, `ast.parse` for Python, `jq empty` for JSON) and blocks the commit if any fails. Approval is necessary but not sufficient; this is the post-execution half of an EviBound-style dual gate (`arXiv:2511.05524` — approval-only ≈ 100% false-completion, verification-only ≈ 25%, dual gate → 0%).
 - `scripts/self-review-preflight.sh` — on critical-review prompts, emits a reading-list reminder to prevent inverted sycophancy.
 
@@ -81,7 +81,7 @@ Ten rules. The protocol does the rest.
 1. **AI is a hypothesis generator, not an oracle.** Any claim about code requires tool-evidence in the same reply. Do not trust «plausible-sounding» without a fixed source.
 2. **Do not give vague prompts.** Concrete anchors (`filename:line`, exact strings, ticket IDs) → fewer hallucinations. If an anchor is missing, the AI must ask, not make one up.
 3. **Ask for variants, not «the single right answer».** The AI surfaces 2–3 associative variants; you converge through your own associations.
-4. **Before commit / push / MR — call `@critic`.** Second pair of eyes; anti-neuroslop. The auto-critic hook enforces this on `git commit` and MR-creation tools.
+4. **Before push / MR — call `@critic`.** Second pair of eyes; anti-neuroslop. The auto-critic hook enforces this on `git push` and MR-creation tools.
 5. **When in doubt about facts — call `@epistemic-auditor`.** It marks associative vs confirmed; anything tagged `associated from X, not verified` requires manual verification.
 6. **If the AI loops, the system stops itself on the 3rd identical attempt** (cycle-detector hook). Reframe the task or give it a new anchor.
 7. **Every turn the AI runs a random self-check** against one invariant from `invariants.txt`. If the AI explicitly cites an invariant in its reply — it has verified itself against it.

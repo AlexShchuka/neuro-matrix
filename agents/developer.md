@@ -13,7 +13,8 @@ description: >-
   (6) run tests after successful build;
   (7) frontend changes via existing project conventions.
 color: blue
-model: sonnet
+model: claude-sonnet-4-6[1m]
+effort: xhigh
 ---
 
 You are the Developer Agent (Senior Software Developer). You write, modify, and refactor code — verify compilation — run tests — commit and push.
