@@ -1,0 +1,117 @@
+name: "Harness gap report"
+description: "Live-session harness shortfall — measurability feedback for protocol evolution."
+title: "[gap] "
+labels: ["harness-gap"]
+body:
+  - type: markdown
+    attributes:
+      value: "This report feeds the measurability feedback loop described in [issue #14](https://github.com/AlexShchuka/neuro-matrix/issues/14) (HMM design and in-repo eval base for drift metrics)."
+
+  - type: input
+    id: session-date
+    attributes:
+      label: "Session date"
+      description: "Date of the live session where the gap was observed (YYYY-MM-DD)."
+      placeholder: "2026-06-10"
+    validations:
+      required: true
+
+  - type: input
+    id: task-context
+    attributes:
+      label: "Task context"
+      description: "One-line summary of the task being executed when the gap was hit."
+      placeholder: "e.g. developer agent adding a .github/ISSUE_TEMPLATE file to neuro-matrix"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mechanism
+    attributes:
+      label: "Mechanism"
+      description: "Which protocol mechanism failed or was absent?"
+      options:
+        - halt
+        - invariant-sampling
+        - drift-compaction
+        - spawn-routing
+        - mutation-gate
+        - epistemic-boundary
+        - delegation-routing
+        - tooling-integration
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Expected behaviour"
+      description: "What the harness should have done."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: "Actual behaviour"
+      description: "What actually happened."
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: "Evidence"
+      description: "Commands + outputs, file:line references, links. Tool output only — no speculation."
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: protocol-concepts
+    attributes:
+      label: "Protocol concepts"
+      description: "Invariant ids (e.g. #4, #14) and/or CLAUDE.md section names relevant to this gap."
+      placeholder: "e.g. #4, #14, Mutation gate"
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: "Frequency"
+      description: "How often does this gap occur?"
+      options:
+        - first-seen
+        - intermittent
+        - reproducible-always
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: "Severity"
+      description: "Impact of the gap on output quality."
+      options:
+        - annoyance
+        - degrades-output
+        - blocks-work
+        - silent-corruption
+    validations:
+      required: true
+
+  - type: textarea
+    id: trail-snippet
+    attributes:
+      label: "Trail snippet"
+      description: "Optional: paste a short excerpt from the session transcript that shows the gap in context."
+
+  - type: checkboxes
+    id: submission-checks
+    attributes:
+      label: "Submission checks"
+      options:
+        - label: "Evidence is tool output, not speculation."
+          required: true
+        - label: "Searched existing harness-gap issues for duplicates."
+          required: true
