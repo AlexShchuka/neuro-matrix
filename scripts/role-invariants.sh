@@ -22,9 +22,11 @@
 set -euo pipefail
 
 ROLE="${1:-}"
-INVARIANTS="${CLAUDE_PLUGIN_ROOT:-}/invariants.txt"
+# Plugin root: CLAUDE_PLUGIN_ROOT overrides; otherwise self-resolve from this script's location (#19).
+ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+INVARIANTS="${ROOT}/invariants.txt"
 if [[ ! -f "$INVARIANTS" ]]; then
-  echo "invariants.txt not found at $INVARIANTS (set CLAUDE_PLUGIN_ROOT)" >&2
+  echo "invariants.txt not found at $INVARIANTS (root = CLAUDE_PLUGIN_ROOT override or self-resolved)" >&2
   exit 1
 fi
 

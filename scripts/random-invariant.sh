@@ -8,7 +8,8 @@
 
 set -euo pipefail
 
-INVARIANTS="${CLAUDE_PLUGIN_ROOT}/invariants.txt"
+# Plugin root: CLAUDE_PLUGIN_ROOT overrides; otherwise self-resolve from this script's location (#19).
+INVARIANTS="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}/invariants.txt"
 
 if [[ ! -f "$INVARIANTS" ]]; then
   exit 0
