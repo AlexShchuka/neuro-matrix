@@ -87,6 +87,24 @@ if [[ -z "$LINE" ]]; then
   exit 0
 fi
 
+# --- Forensic trace + abort trap (#21) ----------------------------------------
+# One trace line per emit attempt. On the next malformed self-check block this
+# discriminates the surviving hypotheses: trace OK + no ABORT record = payload was
+# correct at emit time (post-script transit mangling); trace OK + ABORT = the final
+# cat was cut mid-emit (read end closed early); no trace = died before emitting.
+# Trace writes must never break the hook — every path ends in `|| true`.
+TRACE="${HOME}/.claude-invariant-last"
+if [[ -f "$TRACE" && "$(wc -c < "$TRACE" 2>/dev/null || echo 0)" -gt 102400 ]]; then
+  { tail -n 100 "$TRACE" > "${TRACE}.tmp" && mv "${TRACE}.tmp" "$TRACE"; } 2>/dev/null || true
+fi
+FILE_SHA="$( { md5sum "$INVARIANTS" 2>/dev/null || md5 -q "$INVARIANTS" 2>/dev/null; } | cut -d' ' -f1 || true )"
+printf '%s\tpick=%s\tsha=%s\tline=%.40s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pick" "${FILE_SHA:-?}" "$LINE" \
+  >> "$TRACE" 2>/dev/null || true
+ABORTED=0
+trap '[ "$ABORTED" -eq 1 ] || { ABORTED=1; printf "%s\tABORT\tpick=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${pick:-?}" >> "$TRACE" 2>/dev/null; }; true' ERR PIPE
+# -------------------------------------------------------------------------------
+
 deontic_text=""
 if [[ -n "$DEONTIC" ]]; then
   name="$(deontic_name "$DEONTIC")"
