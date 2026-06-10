@@ -94,7 +94,7 @@ prompt:
 ```
 Forward extracted decisions, not raw user comments. One comprehensive call per agent type per task. No parallel sub-agents in the same domain unless work is genuinely partitionable.
 
-**Invariant inheritance.** Sub-agents do not receive the `UserPromptSubmit` hook — without explicit propagation they run with zero invariant self-check. `scripts/role-invariants.sh <role>` returns the information-bottleneck minimum subset for the role (developer / analyzer / critic / epistemic-auditor), addressed by each invariant's stable `#N` id so the inherited set never drifts when invariants are added or reordered.
+**Invariant inheritance.** Sub-agents do not receive the `UserPromptSubmit` hook — without explicit propagation they run with zero invariant self-check. `scripts/role-invariants.sh <role>` returns the information-bottleneck minimum subset for the role (developer / analyzer / critic / epistemic-auditor), addressed by each invariant's stable `#N` id so the inherited set never drifts when invariants are added or reordered. The script self-resolves its plugin root from its own location; `CLAUDE_PLUGIN_ROOT`, when set, overrides.
 
 ## Tool discipline
 Large outputs (full diffs, dumps, big curl) → write to file → read. Never reason on truncated previews. When two tools disagree, the network-side command wins.
