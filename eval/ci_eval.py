@@ -839,9 +839,22 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
       - Any McNemar adversarial regression OR any canary leak -> FAIL (exit 1)
       - Wilcoxon/Cohen's-d shortfall -> WARNING (job stays green)
       - All conditions met -> APPROVE
+
+    A1/A2 fail-closed: missing expected markers (no "VERDICT:" / "McNemar adv:"
+    in stats_text, or no "Checked" in canary_text) are treated as structural
+    failures. A crash that writes a traceback to stderr but no verdict to stdout
+    must never fall through to APPROVE — missing evidence == FAIL.
     """
     job_fails = False
     verdict = "APPROVE"
+
+    # A2 fail-closed: canary checker must print "Checked N response(s)" on its
+    # normal success path. Non-empty output lacking this marker means the
+    # checker crashed before completing — treat as contamination unknown.
+    if canary_text and "Checked" not in canary_text:
+        job_fails = True
+        verdict = "FAIL — STRUCTURAL: canary checker produced no normal output (possible crash)"
+        return verdict, job_fails
 
     # canary leak check — check-canary-leak.py prints "CONTAMINATION" when a
     # leak is found. Avoid false-matching "No canary leaks detected." by
@@ -849,6 +862,17 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
     if "CONTAMINATION" in canary_text:
         job_fails = True
         verdict = "FAIL — canary contamination detected"
+        return verdict, job_fails
+
+    # A1 fail-closed: stats output must contain the VERDICT line AND the
+    # McNemar adv line.  If either is absent the script likely crashed and
+    # returned a traceback — missing evidence must never read as APPROVE.
+    if stats_text and ("VERDICT:" not in stats_text or "McNemar adv:" not in stats_text):
+        job_fails = True
+        verdict = (
+            "FAIL — STRUCTURAL: stats output missing expected markers "
+            "(possible crash or truncated output)"
+        )
         return verdict, job_fails
 
     # McNemar adversarial regression
@@ -978,8 +1002,8 @@ def main() -> int:
         help="Generation model (default: claude-haiku-4-5)",
     )
     run_p.add_argument(
-        "--judge-model", default="claude-sonnet-4-6",
-        help="Judge model (default: claude-sonnet-4-6)",
+        "--judge-model", default="claude-haiku-4-5",
+        help="Judge model (default: claude-haiku-4-5)",
     )
     run_p.add_argument(
         "--prompts-dir", default="",

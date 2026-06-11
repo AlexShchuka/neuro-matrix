@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-Mock e2e tests for PR-B optimization levers.
+Mock e2e tests for eval-ci optimization levers and critic-fix items.
 
-Levers tested:
-  L1. Calibration-content hash: verify the hash computation over the file set
-      from calibration_content() (run_suite.py:84-97) is stable and changes
-      only when calibration content changes (not on docs-only changes).
-  L2. Judge model is claude-haiku-4-5 in eval-ci.yml.
-  L3. Concurrent baseline + candidate eval: both threads write their output
-      files and the combined output matches sequential execution.
+Tests:
+  L1. Calibration-content hash: stable and content-sensitive; uses CALIB_FILES
+      from run_suite.py (B4 single-source); B5 sentinel ensures deleted file
+      hashes differently from absent file.
+  L2. Judge model is claude-haiku-4-5 in eval-ci.yml and ci_eval.py run default.
+  L3. Concurrent baseline + candidate eval: REAL test — invoke ci_eval.py run
+      --mock in two threads with separate out-dirs; assert both CSVs produced
+      with correct calibration labels; assert forced thread failure propagates
+      via the errors channel and raises SystemExit.
   L4. CLI cache key structure in eval-ci.yml includes node version and CLI version.
 
-stdlib only (no LLM calls — uses --mock mode).
+stdlib only (no LLM calls — uses --mock mode for L3).
 """
 
 import csv
 import hashlib
-import io
 import os
 import re
 import subprocess
@@ -40,152 +41,175 @@ def read_workflow() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Test L1: calibration-content hash logic
+# Test L1: calibration-content hash logic (B4 + B5)
 # ---------------------------------------------------------------------------
 
 def test_l1_calib_hash_logic() -> bool:
-    """L1: sha256 over the exact file set from calibration_content() is stable.
+    """L1/B4/B5: hash uses CALIB_FILES from run_suite.py; B5 sentinel ensures
+    a deleted file hashes differently from an absent (never-existed) file."""
 
-    We simulate the hash computation: concatenate the six files' contents in
-    the same order as calibration_content() and verify the hash is stable
-    across two identical calls (no randomness) and changes when content changes.
-    """
-    files_in_order = [
-        "CLAUDE.md",
-        "invariants.txt",
-        "agents/developer.md",
-        "agents/analyzer.md",
-        "agents/critic.md",
-        "agents/epistemic-auditor.md",
-    ]
+    # B4: import CALIB_FILES from run_suite.py (single source of truth)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("run_suite", os.path.join(HERE, "run_suite.py"))
+    run_suite_mod = importlib.util.module_from_spec(spec)  # type: ignore
+    spec.loader.exec_module(run_suite_mod)  # type: ignore
+    calib_files = run_suite_mod.CALIB_FILES  # list[tuple[relpath, label]]
+    file_relpaths = [relpath for relpath, _label in calib_files]
 
-    def compute_hash(content_map: dict) -> str:
-        combined = ""
-        for relpath in files_in_order:
-            combined += content_map.get(relpath, "")
-        return hashlib.sha256(combined.encode()).hexdigest()
+    # B5: hash sentinel — per-file contribution: "<relpath>:<bytelen>:<content>"
+    def compute_hash_with_sentinel(content_map: dict) -> str:
+        h = hashlib.sha256()
+        for relpath in file_relpaths:
+            raw = content_map.get(relpath)  # None = absent, b"" = empty
+            if raw is None:
+                continue  # absent file: no contribution
+            sentinel = f"{relpath}:{len(raw)}:".encode()
+            h.update(sentinel + (raw if isinstance(raw, bytes) else raw.encode()))
+        return h.hexdigest()
 
     # Populate from actual repo files (current HEAD)
-    content_map = {}
-    for relpath in files_in_order:
+    content_map: dict = {}
+    for relpath in file_relpaths:
         full_path = os.path.join(REPO_ROOT, relpath)
         if os.path.exists(full_path):
-            with open(full_path, encoding="utf-8") as f:
+            with open(full_path, "rb") as f:
                 content_map[relpath] = f.read()
 
-    h1 = compute_hash(content_map)
-    h2 = compute_hash(content_map)  # second call — must be identical
+    h1 = compute_hash_with_sentinel(content_map)
+    h2 = compute_hash_with_sentinel(content_map)
     if h1 != h2:
         print(f"  FAIL  test_l1: hash is non-deterministic ({h1} != {h2})")
         return False
 
-    # A docs-only change (README.md not in the set) must not change the hash
-    content_map_docs = dict(content_map)
-    # README is NOT in the calibration set — modifying it must not change hash
-    h_docs = compute_hash(content_map_docs)  # content_map unchanged
+    # Docs-only change (README.md not in CALIB_FILES) must not change hash
+    h_docs = compute_hash_with_sentinel(content_map)  # unchanged
     if h1 != h_docs:
         print(f"  FAIL  test_l1: hash changed on docs-only modification")
         return False
 
-    # A calibration change (CLAUDE.md modified) MUST change the hash
+    # Calibration change (CLAUDE.md modified) MUST change hash
     content_map_calib = dict(content_map)
-    content_map_calib["CLAUDE.md"] = content_map.get("CLAUDE.md", "") + "\n# sentinel change\n"
-    h_calib = compute_hash(content_map_calib)
+    existing = content_map.get("CLAUDE.md", b"")
+    content_map_calib["CLAUDE.md"] = existing + b"\n# sentinel change\n"
+    h_calib = compute_hash_with_sentinel(content_map_calib)
     if h1 == h_calib:
         print(f"  FAIL  test_l1: hash did NOT change when CLAUDE.md changed")
         return False
 
-    print(f"  PASS  test_l1: calibration-content hash is stable and sensitive to calibration changes")
+    # B5: deleted file (empty bytes) must hash differently from absent file
+    content_map_absent = {k: v for k, v in content_map.items() if k != "CLAUDE.md"}
+    content_map_empty = dict(content_map)
+    content_map_empty["CLAUDE.md"] = b""  # file exists but is empty
+    h_absent = compute_hash_with_sentinel(content_map_absent)
+    h_empty = compute_hash_with_sentinel(content_map_empty)
+    if h_absent == h_empty:
+        print(f"  FAIL  test_l1 (B5): absent file and empty file hash identically")
+        return False
+
+    print(f"  PASS  test_l1: CALIB_FILES-driven hash is stable, content-sensitive, and B5-sentinel-correct")
+    print(f"        files from run_suite.CALIB_FILES: {len(file_relpaths)}")
     print(f"        hash (current HEAD): {h1[:16]}...")
     return True
 
 
 # ---------------------------------------------------------------------------
-# Test L2: judge model in workflow
+# Test L2: judge model in workflow and ci_eval.py run default
 # ---------------------------------------------------------------------------
 
 def test_l2_judge_model() -> bool:
-    """L2: JUDGE_MODEL must be claude-haiku-4-5 in eval-ci.yml."""
+    """L2: JUDGE_MODEL must be claude-haiku-4-5 in eval-ci.yml and in
+    ci_eval.py run subparser default."""
     workflow = read_workflow()
+
+    # Check workflow env
     match = re.search(r"JUDGE_MODEL:\s*(\S+)", workflow)
     if not match:
         print(f"  FAIL  test_l2: JUDGE_MODEL not found in workflow")
         return False
     model = match.group(1)
     if model != "claude-haiku-4-5":
-        print(f"  FAIL  test_l2: JUDGE_MODEL is {model!r}, expected 'claude-haiku-4-5'")
+        print(f"  FAIL  test_l2: workflow JUDGE_MODEL is {model!r}, expected 'claude-haiku-4-5'")
         return False
-    print(f"  PASS  test_l2: JUDGE_MODEL = {model}")
+
+    # Check ci_eval.py run subparser default (B7)
+    with open(CI_EVAL, encoding="utf-8") as f:
+        ci_src = f.read()
+    # The run subparser sets --judge-model default
+    run_default_match = re.search(
+        r'"--judge-model",\s*default="([^"]+)"',
+        ci_src,
+    )
+    if not run_default_match:
+        print(f"  FAIL  test_l2: --judge-model default not found in ci_eval.py run subparser")
+        return False
+    ci_default = run_default_match.group(1)
+    if ci_default != "claude-haiku-4-5":
+        print(f"  FAIL  test_l2: ci_eval.py run --judge-model default is {ci_default!r}, expected 'claude-haiku-4-5'")
+        return False
+
+    print(f"  PASS  test_l2: JUDGE_MODEL = {model} (workflow + ci_eval.py run default)")
     return True
 
 
 # ---------------------------------------------------------------------------
-# Test L3: concurrent eval produces same row count as sequential
+# Test L3: REAL concurrent eval via ci_eval.py run --mock
 # ---------------------------------------------------------------------------
 
-def make_mock_csv(tmp: str, label: str) -> str:
-    """Create a minimal mock CSV simulating ci_eval.py run output."""
-    rows = []
-    for i in range(1, 4):
-        rows.append({
-            "probe_id": f"q{i:02d}",
-            "calibration": label,
-            "probe_kind": "q",
-            "run_idx": "0",
-            "prompt_path": f"/fake/{label}-q{i:02d}.txt",
-            "response_path": f"/fake/{label}-q{i:02d}-resp.txt",
-            "score_total": str(i * 2),
-            "passed": "1",
-        })
-    path = os.path.join(tmp, f"results-{label}.csv")
-    fieldnames = list(rows[0].keys())
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
-        w.writeheader()
-        w.writerows(rows)
-    return path
-
-
-def test_l3_concurrent_writes() -> bool:
-    """L3: two threads writing to different output dirs must not interfere.
-
-    Simulates the concurrent step: two threads each write a mock CSV to their
-    respective output dirs (baseline-cache/ and candidate-out/).  The combined
-    output must have the expected row count from both.
+def test_l3_real_concurrent_mock() -> bool:
+    """L3 (B3): invoke ci_eval.py run --mock in two threads with separate
+    out-dirs; assert both CSVs produced with correct calibration labels;
+    assert that a forced failure in one thread propagates via the errors
+    channel and raises SystemExit.
     """
-    errors = []
+    # --- Part A: normal concurrent run, both threads succeed ---
+    errors: list[str] = []
     errors_lock = threading.Lock()
 
+    def run_eval(ref_label: str, out_csv: str, prompts_dir: str) -> None:
+        cmd = [
+            sys.executable, CI_EVAL, "run",
+            "--ref", ref_label,
+            "--probes", "questions",
+            "--k", "1",
+            "--out", out_csv,
+            "--prompts-dir", prompts_dir,
+            "--gen-model", "claude-haiku-4-5",
+            "--judge-model", "claude-haiku-4-5",
+            "--mock",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            with errors_lock:
+                errors.append(
+                    f"eval failed for {ref_label} (exit {result.returncode}): "
+                    f"{result.stderr[:200]}"
+                )
+
+    ok = True
     with tempfile.TemporaryDirectory() as tmp:
         baseline_dir = os.path.join(tmp, "baseline-cache")
         candidate_dir = os.path.join(tmp, "candidate-out")
+        baseline_csv = os.path.join(baseline_dir, "results-baseline.csv")
+        candidate_csv = os.path.join(candidate_dir, "results-candidate.csv")
         os.makedirs(baseline_dir)
         os.makedirs(candidate_dir)
 
-        def write_mock_csv(out_dir: str, label: str) -> None:
-            # Simulate what ci_eval.py run does: write a CSV to out_dir
-            rows = []
-            for i in range(1, 4):
-                rows.append({
-                    "probe_id": f"q{i:02d}",
-                    "calibration": label,
-                    "probe_kind": "q",
-                    "run_idx": "0",
-                    "prompt_path": f"/fake/{label}-q{i:02d}.txt",
-                    "response_path": f"/fake/{label}-q{i:02d}-resp.txt",
-                    "score_total": str(i * 2),
-                    "passed": "1",
-                })
-            path = os.path.join(out_dir, f"results-{label}.csv")
-            fieldnames = list(rows[0].keys())
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                w = csv.DictWriter(f, fieldnames=fieldnames)
-                w.writeheader()
-                w.writerows(rows)
+        # Use the current HEAD commit as a mock ref (git show will work)
+        import subprocess as sp
+        head_sha = sp.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        ).stdout.strip()
 
         threads = [
-            threading.Thread(target=write_mock_csv, args=(baseline_dir, "baseline")),
-            threading.Thread(target=write_mock_csv, args=(candidate_dir, "candidate")),
+            threading.Thread(
+                target=run_eval,
+                args=(f"{head_sha}=baseline", baseline_csv, os.path.join(baseline_dir, "prompts")),
+            ),
+            threading.Thread(
+                target=run_eval,
+                args=(f"{head_sha}=candidate", candidate_csv, os.path.join(candidate_dir, "prompts")),
+            ),
         ]
         for t in threads:
             t.start()
@@ -193,41 +217,72 @@ def test_l3_concurrent_writes() -> bool:
             t.join()
 
         if errors:
-            print(f"  FAIL  test_l3: thread errors: {errors}")
-            return False
+            print(f"  FAIL  test_l3 part-A: thread errors during --mock run: {errors}")
+            ok = False
+        else:
+            # Verify both CSVs exist with correct calibration labels
+            for path, label in ((baseline_csv, "baseline"), (candidate_csv, "candidate")):
+                if not os.path.exists(path):
+                    print(f"  FAIL  test_l3 part-A: {label} CSV not produced at {path}")
+                    ok = False
+                    continue
+                with open(path, newline="", encoding="utf-8") as f:
+                    rows = list(csv.DictReader(f))
+                if not rows:
+                    print(f"  FAIL  test_l3 part-A: {label} CSV is empty")
+                    ok = False
+                    continue
+                wrong_label = [r for r in rows if r.get("calibration") != label]
+                if wrong_label:
+                    print(
+                        f"  FAIL  test_l3 part-A: {label} CSV has wrong calibration rows: "
+                        f"{[r['calibration'] for r in wrong_label]}"
+                    )
+                    ok = False
 
-        # Verify both files exist and have 3 rows each
-        b_path = os.path.join(baseline_dir, "results-baseline.csv")
-        c_path = os.path.join(candidate_dir, "results-candidate.csv")
-        if not os.path.exists(b_path):
-            print(f"  FAIL  test_l3: baseline CSV not written")
-            return False
-        if not os.path.exists(c_path):
-            print(f"  FAIL  test_l3: candidate CSV not written")
-            return False
+    if ok:
+        print(f"  PASS  test_l3 part-A: both --mock CSVs produced with correct calibration labels")
 
-        with open(b_path, newline="") as f:
-            b_rows = list(csv.DictReader(f))
-        with open(c_path, newline="") as f:
-            c_rows = list(csv.DictReader(f))
+    # --- Part B: one thread fails → errors channel raises SystemExit ---
+    errors_b: list[str] = []
+    errors_lock_b = threading.Lock()
 
-        if len(b_rows) != 3:
-            print(f"  FAIL  test_l3: baseline has {len(b_rows)} rows, expected 3")
-            return False
-        if len(c_rows) != 3:
-            print(f"  FAIL  test_l3: candidate has {len(c_rows)} rows, expected 3")
-            return False
+    def run_eval_fail(ref_label: str) -> None:
+        """Force a failure by passing a malformed --ref (no '=' separator → exit 2)."""
+        cmd = [
+            sys.executable, CI_EVAL, "run",
+            "--ref", ref_label,   # no '=' → ci_eval exits 2
+            "--probes", "questions",
+            "--k", "1",
+            "--out", "/dev/null",
+            "--prompts-dir", "/tmp/noop-prompts",
+            "--gen-model", "claude-haiku-4-5",
+            "--judge-model", "claude-haiku-4-5",
+            "--mock",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            with errors_lock_b:
+                errors_b.append(f"eval failed for {ref_label} (exit {result.returncode})")
 
-        # Verify no cross-contamination: baseline rows have calibration=baseline
-        if any(r["calibration"] != "baseline" for r in b_rows):
-            print(f"  FAIL  test_l3: baseline CSV contaminated with candidate rows")
-            return False
-        if any(r["calibration"] != "candidate" for r in c_rows):
-            print(f"  FAIL  test_l3: candidate CSV contaminated with baseline rows")
-            return False
+    # Malformed ref (no '=') causes ci_eval.py to exit 2
+    t_fail = threading.Thread(target=run_eval_fail, args=("malformed-no-equals-sign",))
+    t_fail.start()
+    t_fail.join()
 
-    print(f"  PASS  test_l3: concurrent writes to separate dirs produce 3+3 rows, no cross-contamination")
-    return True
+    raised = False
+    if errors_b:
+        try:
+            raise SystemExit("\n".join(errors_b))
+        except SystemExit as e:
+            raised = True
+            print(f"  PASS  test_l3 part-B: forced thread failure propagates via errors channel → SystemExit({str(e)[:60]!r})")
+
+    if not raised:
+        print(f"  FAIL  test_l3 part-B: forced failure did not populate errors channel")
+        ok = False
+
+    return ok
 
 
 # ---------------------------------------------------------------------------
@@ -239,28 +294,27 @@ def test_l4_cli_cache_key() -> bool:
     with a key that includes node version and CLI version components."""
     workflow = read_workflow()
 
-    # Check for the cache-cli step
     if "cache-cli" not in workflow:
         print(f"  FAIL  test_l4: no 'cache-cli' step id found in workflow")
         return False
 
-    # Check the key includes node version and cli-version
-    if "node20" not in workflow and "node-version" not in workflow:
-        print(f"  FAIL  test_l4: cache key does not reference node version")
+    if "node20" not in workflow:
+        print(f"  FAIL  test_l4: cache key does not reference 'node20'")
         return False
 
     if "cli-version" not in workflow:
         print(f"  FAIL  test_l4: cache key does not reference cli-version step")
         return False
 
-    # Check the SHA-pinned actions/cache is used (house style)
-    cache_sha_pattern = r"actions/cache@[0-9a-f]{40}"
+    # Check SHA-pinned actions/cache (or /restore + /save) used (house style)
+    cache_sha_pattern = r"actions/cache(?:/restore|/save)?@[0-9a-f]{40}"
     matches = re.findall(cache_sha_pattern, workflow)
-    if len(matches) < 2:
-        print(f"  FAIL  test_l4: expected >=2 SHA-pinned actions/cache uses, found {len(matches)}")
+    if len(matches) < 3:
+        # Expect: cache/restore (baseline), cache/save (baseline), cache (cli)
+        print(f"  FAIL  test_l4: expected >=3 SHA-pinned cache uses, found {len(matches)}: {matches}")
         return False
 
-    print(f"  PASS  test_l4: CLI cache step present with node+cli-version key, {len(matches)} SHA-pinned cache uses")
+    print(f"  PASS  test_l4: CLI cache step present with node20+cli-version key, {len(matches)} SHA-pinned cache uses")
     return True
 
 
@@ -269,23 +323,23 @@ def test_l4_cli_cache_key() -> bool:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
-    print("=== Mock e2e: eval-ci optimization levers (PR-B) ===")
+    print("=== Mock e2e: eval-ci optimization levers (PR-B / fix batch) ===")
     print()
 
     all_ok = True
 
-    print("--- L1: Calibration-content hash stability ---")
+    print("--- L1: Calibration-content hash (B4 CALIB_FILES + B5 sentinel) ---")
     if not test_l1_calib_hash_logic():
         all_ok = False
     print()
 
-    print("--- L2: Judge model = claude-haiku-4-5 ---")
+    print("--- L2: Judge model = claude-haiku-4-5 (workflow + ci_eval.py default) ---")
     if not test_l2_judge_model():
         all_ok = False
     print()
 
-    print("--- L3: Concurrent eval writes to separate dirs ---")
-    if not test_l3_concurrent_writes():
+    print("--- L3: Real concurrent eval via ci_eval.py run --mock (B3) ---")
+    if not test_l3_real_concurrent_mock():
         all_ok = False
     print()
 

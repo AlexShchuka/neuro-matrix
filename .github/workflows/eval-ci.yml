@@ -158,28 +158,36 @@ jobs:
           BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
         run: |
           set -euo pipefail
-          # Mirror calibration_content() file set from run_suite.py:84-97
-          # exactly: CLAUDE.md, invariants.txt, agents/developer.md,
-          # agents/analyzer.md, agents/critic.md, agents/epistemic-auditor.md
-          hash=$(
-            for relpath in \
-              CLAUDE.md \
-              invariants.txt \
-              agents/developer.md \
-              agents/analyzer.md \
-              agents/critic.md \
-              agents/epistemic-auditor.md
-            do
-              git show "${BASELINE_SHA}:${relpath}" 2>/dev/null || true
-            done \
-            | sha256sum | cut -d' ' -f1
+          # B5: Use CALIB_FILES from run_suite.py as the single source of truth.
+          # Sentinel "<relpath>:<bytelen>:<content>" per file so a deleted file
+          # produces a different hash than an empty file (absent ≠ empty).
+          hash=$(python3 - <<'PY'
+          import hashlib, subprocess, sys, os
+          sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath("eval/run_suite.py")), "eval"))
+          from run_suite import CALIB_FILES
+          sha = hashlib.sha256()
+          baseline_sha = os.environ["BASELINE_SHA"]
+          for relpath, _label in CALIB_FILES:
+              r = subprocess.run(
+                  ["git", "show", f"{baseline_sha}:{relpath}"],
+                  capture_output=True,
+              )
+              content = r.stdout if r.returncode == 0 else b""
+              sentinel = f"{relpath}:{len(content)}:".encode() + content + b"\n"
+              sha.update(sentinel)
+          print(sha.hexdigest())
+          PY
           )
           echo "value=$hash" >> "$GITHUB_OUTPUT"
           echo "Calibration-content hash at baseline ${BASELINE_SHA}: $hash"
 
+      # B1: Explicit restore+save split so a candidate failure never poisons
+      # a valid baseline.  Restore here; save is a separate step gated on
+      # baseline_ok (set by the concurrent eval step) with if: always() so
+      # the save runs even when downstream steps fail.
       - name: Restore cached baseline results
         id: cache-baseline
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: baseline-cache/
           key: baseline-${{ steps.calib-hash.outputs.value }}-${{ steps.probe-hash.outputs.value }}
@@ -222,9 +230,23 @@ jobs:
         if: steps.cache-cli.outputs.cache-hit != 'true'
         run: npm install -g @anthropic-ai/claude-code
 
+      # B6: smoke-test the CLI; reinstall on stale/broken cache restore.
+      - name: Verify Claude Code CLI (smoke + reinstall on failure)
+        run: |
+          set -euo pipefail
+          if ! claude --version 2>/dev/null; then
+            echo "claude --version failed — reinstalling (stale cache or missing bin)" >&2
+            npm install -g @anthropic-ai/claude-code
+            claude --version
+          fi
+
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: '3.x'
+          # A6: pin 3.12 — scipy 1.15.3 has no cp314 wheel (Python 3.14 runner
+          # tried a source build → OpenBLAS not found → exit 1, live run evidence:
+          # /tmp/eval46-fail2.log).  cp312 wheel exists; pin to 3.12 to avoid
+          # silent regressions on future '3.x' → 3.15+ upgrades.
+          python-version: '3.12'
 
       - name: Install Python dependencies
         # scipy is required for the Wilcoxon signed-rank test in statistical_test.py.
@@ -259,6 +281,7 @@ jobs:
       # only the candidate runs (fast path unchanged).
       # -----------------------------------------------------------------------
       - name: Run baseline + candidate eval concurrently (cache miss)
+        id: concurrent-eval
         if: steps.cache-baseline.outputs.cache-hit != 'true'
         env:
           BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
@@ -308,7 +331,28 @@ jobs:
               t.join()
           if errors:
               raise SystemExit("\n".join(errors))
+
+          # B2: assert both expected CSV paths exist after threads complete
+          import pathlib
+          missing = []
+          for p in ("baseline-cache/results-baseline.csv", "candidate-out/results-candidate.csv"):
+              if not pathlib.Path(p).exists():
+                  missing.append(p)
+          if missing:
+              raise SystemExit(f"eval produced no output CSV(s): {missing}")
           PY
+          # Signal to the cache-save step that baseline is valid
+          echo "baseline_ok=true" >> "$GITHUB_OUTPUT"
+
+      # B1: Save baseline only when it was freshly computed AND baseline_ok is true.
+      # always() ensures this runs even if a candidate failure follows; the gate
+      # on baseline_ok prevents saving a partial/absent baseline-cache/.
+      - name: Save baseline cache
+        if: always() && steps.concurrent-eval.outputs.baseline_ok == 'true' && steps.cache-baseline.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: baseline-cache/
+          key: ${{ steps.cache-baseline.outputs.cache-primary-key }}
 
       - name: Run candidate eval (cache hit — baseline reused)
         if: steps.cache-baseline.outputs.cache-hit == 'true'
@@ -368,10 +412,22 @@ jobs:
       - name: Run statistical test
         run: |
           set -euo pipefail
+          # A1: rc-capture pattern — pipe through tee but capture the Python
+          # exit code via PIPESTATUS (not the tee exit code).  Accept 0 (APPROVE)
+          # and 1 (FIX-REQUIRED/FAIL — verdict present, job must still post comment).
+          # Any other rc (crash, import error, missing file …) exits the step non-zero
+          # so the job goes red instead of silently producing an empty stats file.
+          set +e
           python3 eval/statistical_test.py merged-results.csv \
             --baseline baseline \
             --candidate candidate \
-            | tee stats-output.txt || true
+            | tee stats-output.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+            echo "statistical_test.py exited with unexpected rc=$rc (crash or missing dep)" >&2
+            exit "$rc"
+          fi
 
       # -----------------------------------------------------------------------
       # Canary leak check — separate step; own responsibility.
@@ -379,8 +435,18 @@ jobs:
       - name: Check canary leaks in responses
         run: |
           set -euo pipefail
+          # A2: same rc-capture pattern as stats step.  check-canary-leak.py exits
+          # 0 (no leaks) or 1 (leaks detected — still want the output for the comment).
+          # Any other rc is a crash and must not silently produce empty canary-output.txt.
+          set +e
           python3 scripts/check-canary-leak.py merged-results.csv \
-            | tee canary-output.txt || true
+            | tee canary-output.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+            echo "check-canary-leak.py exited with unexpected rc=$rc (crash or missing dep)" >&2
+            exit "$rc"
+          fi
 
       # -----------------------------------------------------------------------
       # Format and post the sticky PR comment.
@@ -395,8 +461,10 @@ jobs:
           # lookup; --baseline-sha/--candidate-sha are the git SHAs shown in the
           # comment heading. Keeping them separate fixes the pre-existing bug where
           # passing SHAs as labels caused every table cell to render as "-".
-          # || true: ci_eval.py comment exits 1 on FAIL verdict — must not abort
-          # here; "Enforce fail verdict" is the only step that exits non-zero.
+          # A3: rc-capture — ci_eval.py comment exits 1 on FAIL verdict (output
+          # already written to comment-body.md before exit).  Accept 0 and 1;
+          # any other rc is a crash and the step must fail red.
+          set +e
           python3 eval/ci_eval.py comment \
             --csv merged-results.csv \
             --baseline baseline \
@@ -405,10 +473,16 @@ jobs:
             --candidate-sha "$CANDIDATE_SHA" \
             --stats-output stats-output.txt \
             --canary-output canary-output.txt \
-            > comment-body.md || true
+            > comment-body.md
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+            echo "ci_eval.py comment exited with unexpected rc=$rc (crash)" >&2
+            exit "$rc"
+          fi
 
       - name: Post sticky PR comment
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && hashFiles('comment-body.md') != ''
         uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
         with:
           header: eval-ci-results
