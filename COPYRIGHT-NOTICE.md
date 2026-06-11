@@ -1,14 +1,12 @@
 # Copyright notice
 
-© 2026 Aleksandr Shchuka. Licensed under the PolyForm Noncommercial License 1.0.0 — see `LICENSE`.
+© 2026 Aleksandr Shchuka. Licensed under the MIT License — see `LICENSE`.
 
 ## License
 
-License: **PolyForm Noncommercial 1.0.0** (noncommercial use only) — see the [`LICENSE`](LICENSE) file.
+License: **MIT** — see the [`LICENSE`](LICENSE) file.
 
-The work is **source-available** under the PolyForm Noncommercial License 1.0.0: you may use, modify, and redistribute it **for noncommercial purposes only**. The license permits any noncommercial purpose — including personal use (research, study, hobby projects) and use by charitable, educational, public-research, public-safety/health, environmental, and government institutions — and does not grant commercial use. The license includes a patent grant. It is deliberately **not** an OSI-approved open-source license, because it restricts commercial use. The `LICENSE` file, together with this notice, governs use of the work.
-
-Commercial use is **not** granted by this license. A separate commercial license may be offered later; until then, commercial use requires the author's prior written permission.
+The work is open-source under the MIT License: you may use, modify, and redistribute it for any purpose, including commercial use, subject to the conditions of the MIT License. The software is provided without warranty of any kind. The `LICENSE` file, together with this notice, governs use of the work.
 
 ## Authorship and provenance
 
