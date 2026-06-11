@@ -1,0 +1,12 @@
+# common-code.sample.jsonl - sample interchange file for the A/D Common Code.
+# One JSON object per line. Blank lines and lines starting with '#' are ignored.
+# Validate with:  python3 check_common_code.py common-code.sample.jsonl
+# Each record is the three-sided invariant: A's view | D's view | science anchor | verdict.
+{"id": "I1", "a_view": "\"invariant\" = a property that never breaks under the system's moves", "d_view": "\"invariant\" = a fixed key setting you lock so it stops changing", "science_anchor": {"text": "fixed point / conserved quantity under a transformation", "source": "Shannon 1948 BSTJ 27 (codebook); standard math usage", "tag": "FACT"}, "verdict": "DIVERGE"}
+{"id": "I2", "a_view": "misunderstanding is a property of the PAIR, not of one person", "d_view": "same - both sides fail to map, not one being wrong", "science_anchor": {"text": "double empathy problem (measured on autistic samples; transfer to A/D is analogy)", "source": "Milton 2012 Disab&Soc 27(6); Crompton 2020 Autism 24(7)", "tag": "ANALOGY"}, "verdict": "MATCH"}
+{"id": "I3", "a_view": "the AI agrees too readily; its agreement is not evidence", "d_view": "same - if the AI never pushes back, treat that as a red flag", "science_anchor": {"text": "RLHF preference models prefer user-matching over correct answers; inverse-scaling", "source": "Sharma 2023 arXiv:2310.13548; Perez 2022 arXiv:2212.09251", "tag": "FACT"}, "verdict": "MATCH"}
+{"id": "I4", "a_view": "rechecks must be rare and grow slowly or they cost more than they save", "d_view": "same - do not ask 'did I understand?' every turn", "science_anchor": {"text": "vigilant monitoring degrades; recheck-as-main-task is net-negative", "source": "Bainbridge 1983 Automatica 19(6):775-779", "tag": "FACT"}, "verdict": "MATCH"}
+{"id": "I5", "a_view": "D's product autonomy goal helps converge our shared model", "d_view": "open - not yet confirmed this generalizes to A's systems", "science_anchor": {"text": "no measured result for this specific transfer", "source": "none-yet: open question; record where evidence would come from before promoting tag", "tag": "HYPO"}, "verdict": "DIVERGE"}
+# --- BAD EXAMPLE (kept commented so the file still passes; uncomment to see it fail) ---
+# Reason it fails: science_anchor.tag is FACT but source is empty -> FAIL ANCHOR/RETRIEVAL.
+# {"id": "I6", "a_view": "x", "d_view": "y", "science_anchor": {"text": "claimed fact", "source": "", "tag": "FACT"}, "verdict": "MATCH"}
