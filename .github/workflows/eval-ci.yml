@@ -64,6 +64,10 @@ jobs:
 
   eval:
     needs: check-secrets
+    # Human gate: the eval-approval environment requires a reviewer click in the
+    # web UI before this job starts. Labels and dispatches only REQUEST a run;
+    # an owner-credentialed agent can add the label but cannot click Approve.
+    environment: eval-approval
     # Token must be present AND either: manual dispatch, or PR carries run-eval label.
     # The label check is an expressions-layer contains() — never interpolated into shell.
     if: |
