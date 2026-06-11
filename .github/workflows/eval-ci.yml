@@ -169,6 +169,11 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Install Python dependencies
+        # scipy is required for the Wilcoxon signed-rank test in statistical_test.py.
+        # Pin to avoid silent breakage; numpy is bundled with scipy.
+        run: pip install scipy==1.15.3
+
       # -----------------------------------------------------------------------
       # Determine k (runs per probe) — smoke mode uses k=1, normal uses k=3.
       # -----------------------------------------------------------------------
@@ -264,7 +269,11 @@ jobs:
           PY
 
       # -----------------------------------------------------------------------
-      # Statistical tests — unchanged contract with statistical_test.py.
+      # Statistical tests — captures output AND exit code without failing the
+      # step. statistical_test.py exits 1 on FIX-REQUIRED; if the step fails
+      # here it kills the job before comment/enforce can run and post results.
+      # "Enforce fail verdict" is the ONLY step that exits non-zero based on
+      # the verdict; this step's job is only to produce stats-output.txt.
       # -----------------------------------------------------------------------
       - name: Run statistical test
         run: |
@@ -272,7 +281,7 @@ jobs:
           python3 eval/statistical_test.py merged-results.csv \
             --baseline baseline \
             --candidate candidate \
-            | tee stats-output.txt
+            | tee stats-output.txt || true
 
       # -----------------------------------------------------------------------
       # Canary leak check — separate step; own responsibility.
@@ -296,6 +305,8 @@ jobs:
           # lookup; --baseline-sha/--candidate-sha are the git SHAs shown in the
           # comment heading. Keeping them separate fixes the pre-existing bug where
           # passing SHAs as labels caused every table cell to render as "-".
+          # || true: ci_eval.py comment exits 1 on FAIL verdict — must not abort
+          # here; "Enforce fail verdict" is the only step that exits non-zero.
           python3 eval/ci_eval.py comment \
             --csv merged-results.csv \
             --baseline baseline \
@@ -304,7 +315,7 @@ jobs:
             --candidate-sha "$CANDIDATE_SHA" \
             --stats-output stats-output.txt \
             --canary-output canary-output.txt \
-            > comment-body.md
+            > comment-body.md || true
 
       - name: Post sticky PR comment
         if: github.event_name == 'pull_request'
