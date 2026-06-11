@@ -3,17 +3,22 @@ name: eval-ci
 # Runs the held-out eval suite (baseline vs candidate) and posts a sticky
 # comment with per-probe scores and a tiered verdict.
 #
-# LABEL-GATED: the LLM eval (generate / judge / stats / comment) only runs
-# when the `run-eval` label is present on the PR, or on workflow_dispatch.
-# Adding the label = owner approval for a full eval run. While the label
-# stays on the PR, subsequent pushes (synchronize) re-run the eval. Removing
-# the label stops auto-runs. Cheap deterministic checks (eval.yml) are always
-# unconditional and are NOT affected by this workflow.
+# LABEL-GATED: the LLM eval only runs when the `run-eval` label is present
+# on the PR, or on workflow_dispatch.  Adding the label = owner approval for
+# a full eval run.  Removing the label stops auto-runs.  Cheap deterministic
+# checks (eval.yml) are always unconditional and are NOT affected by this.
 #
 # paths filter includes eval/** so a labeled probe-only PR re-runs eval with
 # the new measuring instrument applied to both calibrations.
 #
 # This workflow is ADDITIVE — it does not modify eval.yml (probe validation).
+#
+# Parallelism: ci_eval.py run spawns one thread per eval cell (full fan-out).
+# Override with EVAL_MAX_WORKERS env var for emergency throttling.
+# Prompt caching: calibration (60 KB) is passed as --system-prompt so the
+# Anthropic API caches it after the first warm-up call; subsequent parallel
+# calls pay only the small probe-text token cost.
+# Verified: 2026-06-11 — cache_read_input_tokens confirmed in CLI JSON output.
 
 on:
   pull_request:
@@ -87,16 +92,19 @@ jobs:
 
     steps:
       # -----------------------------------------------------------------------
-      # Canary GUID masking — must run before any LLM calls or log output
-      # so GUIDs never appear in Actions logs even if a response leaks one.
+      # Checkout — full history required: run_suite.py uses git show on
+      # merge-base SHA to materialise the baseline calibration content.
       # -----------------------------------------------------------------------
-      - name: Checkout (full history — run_suite.py needs git show on merge-base)
+      - name: Checkout (full history)
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v4
         with:
           fetch-depth: 0
 
+      # -----------------------------------------------------------------------
+      # Canary GUID masking — must run before any LLM calls or log output
+      # so GUIDs never appear in Actions logs even if a response leaks one.
+      # -----------------------------------------------------------------------
       - name: Mask canary GUIDs in Actions logs
-        # extract every UUID-shaped token from probe files and ::add-mask:: it
         run: |
           set -euo pipefail
           guids=$(grep -hoE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' \
@@ -107,38 +115,30 @@ jobs:
           echo "Masked $(echo "$guids" | grep -c . || echo 0) canary GUID(s)."
 
       # -----------------------------------------------------------------------
-      # Resolve SHAs
+      # Resolve SHAs — candidate = PR head; baseline = merge-base with main.
+      # Values go into step outputs; never interpolated directly into shell.
       # -----------------------------------------------------------------------
       - name: Resolve merge-base and candidate SHAs
         id: refs
         env:
-          # Move github context values into env vars so they are never
-          # interpolated directly into shell — defence-in-depth even though
-          # commit SHAs are hex-only and have no injection surface.
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_SHA_FALLBACK: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # candidate = PR head SHA (or the push SHA on workflow_dispatch)
           CANDIDATE_SHA="${PR_HEAD_SHA:-$GITHUB_SHA_FALLBACK}"
-
-          # baseline = merge-base of origin/main and PR head (or HEAD on dispatch)
           git fetch origin main --depth=0 2>/dev/null || true
           BASELINE_SHA=$(git merge-base origin/main "$CANDIDATE_SHA" || echo "")
           if [ -z "$BASELINE_SHA" ]; then
-            # workflow_dispatch from main: use parent commit as baseline
             BASELINE_SHA=$(git rev-parse "${CANDIDATE_SHA}^")
           fi
-
           echo "baseline=$BASELINE_SHA" >> "$GITHUB_OUTPUT"
           echo "candidate=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
           echo "Baseline: $BASELINE_SHA"
           echo "Candidate: $CANDIDATE_SHA"
 
       # -----------------------------------------------------------------------
-      # Cache key for baseline results
-      # The cache key includes the merge-base SHA and a hash of all probe files
-      # so that adding/changing probes invalidates the cached baseline.
+      # Cache key — merge-base SHA + probe-file hash so any probe change
+      # invalidates the cached baseline.
       # -----------------------------------------------------------------------
       - name: Compute probe-hash for cache key
         id: probe-hash
@@ -156,7 +156,7 @@ jobs:
           key: baseline-${{ steps.refs.outputs.baseline }}-${{ steps.probe-hash.outputs.value }}
 
       # -----------------------------------------------------------------------
-      # Install Claude CLI via npm
+      # Toolchain — Node (Claude CLI) + Python
       # -----------------------------------------------------------------------
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -170,13 +170,11 @@ jobs:
           python-version: '3.x'
 
       # -----------------------------------------------------------------------
-      # Determine k (runs per probe) — smoke mode uses k=1, normal uses k=3
+      # Determine k (runs per probe) — smoke mode uses k=1, normal uses k=3.
       # -----------------------------------------------------------------------
-      - name: Set k and probe count
+      - name: Set k and probe list
         id: params
         env:
-          # workflow_dispatch boolean input — move to env var, never interpolate
-          # directly in shell even though GitHub enforces true/false values.
           SMOKE_INPUT: ${{ github.event.inputs.smoke || 'false' }}
         run: |
           smoke="$SMOKE_INPUT"
@@ -191,9 +189,12 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # Run run_suite.py for baseline (skip if cached)
+      # Baseline eval — skipped when cache hit.
+      # Single entrypoint: materialise → cache-warm → generate (parallel) →
+      # judge (parallel). All LLM calls share one cached 60 KB system-prompt
+      # prefix per model per calibration.
       # -----------------------------------------------------------------------
-      - name: Generate baseline prompts + CSV stub
+      - name: Run baseline eval (materialise → generate → judge)
         if: steps.cache-baseline.outputs.cache-hit != 'true'
         env:
           BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
@@ -202,34 +203,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p baseline-cache
-          python3 eval/run_suite.py \
-            --refs "${BASELINE_SHA}=baseline" \
+          python3 eval/ci_eval.py run \
+            --ref "${BASELINE_SHA}=baseline" \
             --probes "$PROBES" \
             --k "$K" \
             --out baseline-cache/results-baseline.csv \
-            --prompts-dir baseline-cache/prompts
-
-      - name: Generate baseline responses
-        if: steps.cache-baseline.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          python3 eval/ci_eval.py generate \
-            --csv baseline-cache/results-baseline.csv \
-            --model "$GEN_MODEL"
-
-      - name: Judge baseline responses
-        if: steps.cache-baseline.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          python3 eval/ci_eval.py judge \
-            --csv baseline-cache/results-baseline.csv \
-            --probes-dir eval \
-            --model "$JUDGE_MODEL"
+            --prompts-dir baseline-cache/prompts \
+            --gen-model "$GEN_MODEL" \
+            --judge-model "$JUDGE_MODEL"
 
       # -----------------------------------------------------------------------
-      # Run run_suite.py for candidate
+      # Candidate eval — always runs (no cache).
+      # Same parallel pattern as baseline.
       # -----------------------------------------------------------------------
-      - name: Generate candidate prompts + CSV stub
+      - name: Run candidate eval (materialise → generate → judge)
         env:
           CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
           PROBES: ${{ steps.params.outputs.probes }}
@@ -237,43 +224,30 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p candidate-out
-          python3 eval/run_suite.py \
-            --refs "${CANDIDATE_SHA}=candidate" \
+          python3 eval/ci_eval.py run \
+            --ref "${CANDIDATE_SHA}=candidate" \
             --probes "$PROBES" \
             --k "$K" \
             --out candidate-out/results-candidate.csv \
-            --prompts-dir candidate-out/prompts
-
-      - name: Generate candidate responses
-        run: |
-          set -euo pipefail
-          python3 eval/ci_eval.py generate \
-            --csv candidate-out/results-candidate.csv \
-            --model "$GEN_MODEL"
-
-      - name: Judge candidate responses
-        run: |
-          set -euo pipefail
-          python3 eval/ci_eval.py judge \
-            --csv candidate-out/results-candidate.csv \
-            --probes-dir eval \
-            --model "$JUDGE_MODEL"
+            --prompts-dir candidate-out/prompts \
+            --gen-model "$GEN_MODEL" \
+            --judge-model "$JUDGE_MODEL"
 
       # -----------------------------------------------------------------------
-      # Merge CSVs and run statistical test
+      # Merge CSVs — one Python expression, single responsibility.
       # -----------------------------------------------------------------------
       - name: Merge baseline + candidate CSVs
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import csv, pathlib
+          import csv, pathlib, sys
 
-          out_path = pathlib.Path("merged-results.csv")
-          rows = []
-          for p in [
+          sources = [
               "baseline-cache/results-baseline.csv",
               "candidate-out/results-candidate.csv",
-          ]:
+          ]
+          rows = []
+          for p in sources:
               with open(p, newline="", encoding="utf-8") as f:
                   rows.extend(list(csv.DictReader(f)))
 
@@ -281,14 +255,17 @@ jobs:
               raise SystemExit("merged CSV is empty")
 
           fieldnames = list(rows[0].keys())
-          with open(out_path, "w", newline="", encoding="utf-8") as f:
+          out = pathlib.Path("merged-results.csv")
+          with open(out, "w", newline="", encoding="utf-8") as f:
               w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
               w.writeheader()
               w.writerows(rows)
-
-          print(f"Merged {len(rows)} rows → {out_path}")
+          print(f"Merged {len(rows)} rows -> {out}")
           PY
 
+      # -----------------------------------------------------------------------
+      # Statistical tests — unchanged contract with statistical_test.py.
+      # -----------------------------------------------------------------------
       - name: Run statistical test
         run: |
           set -euo pipefail
@@ -296,21 +273,18 @@ jobs:
             --baseline baseline \
             --candidate candidate \
             | tee stats-output.txt
-          # tee keeps stdout for the log; we also capture to file for comment
 
       # -----------------------------------------------------------------------
-      # Canary leak check on merged responses
+      # Canary leak check — separate step; own responsibility.
       # -----------------------------------------------------------------------
       - name: Check canary leaks in responses
-        # exit code from check-canary-leak is already part of the tiered verdict
-        # in ci_eval.py comment — capture output and let comment subcommand fail
         run: |
           set -euo pipefail
           python3 scripts/check-canary-leak.py merged-results.csv \
             | tee canary-output.txt || true
 
       # -----------------------------------------------------------------------
-      # Format and post the sticky comment
+      # Format and post the sticky PR comment.
       # -----------------------------------------------------------------------
       - name: Format PR comment
         env:
@@ -318,16 +292,21 @@ jobs:
           CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
         run: |
           set -euo pipefail
+          # --baseline/--candidate are the CSV calibration labels used for table
+          # lookup; --baseline-sha/--candidate-sha are the git SHAs shown in the
+          # comment heading. Keeping them separate fixes the pre-existing bug where
+          # passing SHAs as labels caused every table cell to render as "-".
           python3 eval/ci_eval.py comment \
             --csv merged-results.csv \
-            --baseline "$BASELINE_SHA" \
-            --candidate "$CANDIDATE_SHA" \
+            --baseline baseline \
+            --candidate candidate \
+            --baseline-sha "$BASELINE_SHA" \
+            --candidate-sha "$CANDIDATE_SHA" \
             --stats-output stats-output.txt \
             --canary-output canary-output.txt \
             > comment-body.md
 
       - name: Post sticky PR comment
-        # Only post on actual pull_request events, not workflow_dispatch
         if: github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
         with:
@@ -335,19 +314,17 @@ jobs:
           path: comment-body.md
 
       # -----------------------------------------------------------------------
-      # Enforce tiered verdict: fail the job on adversarial regression or canary
+      # Enforce tiered verdict — fails the job on regression or canary leak.
       # -----------------------------------------------------------------------
       - name: Enforce fail verdict
-        env:
-          BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
-          CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
         run: |
           set -euo pipefail
           python3 eval/ci_eval.py comment \
             --csv merged-results.csv \
-            --baseline "$BASELINE_SHA" \
-            --candidate "$CANDIDATE_SHA" \
+            --baseline baseline \
+            --candidate candidate \
             --stats-output stats-output.txt \
             --canary-output canary-output.txt \
             > /dev/null
           # ci_eval.py comment exits 1 on FAIL verdict, 0 on APPROVE/WARNING
+          # --baseline-sha/--candidate-sha omitted here (heading not needed for enforcement)
