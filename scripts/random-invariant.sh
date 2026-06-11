@@ -94,13 +94,24 @@ fi
 # correct at emit time (post-script transit mangling); trace OK + ABORT = the final
 # cat was cut mid-emit (read end closed early); no trace = died before emitting.
 # Trace writes must never break the hook — every path ends in `|| true`.
+#
+# Extended fields added for #21 discriminant (issue: bare "62" as invariant payload):
+#   script_sha  — md5 of this script itself (via BASH_SOURCE[0]); separates hypothesis A
+#                 (transient different script version) from B (array corruption same script).
+#   len         — ${#LINES[@]} at sample time; confirms parse completed correctly.
+#   first       — first 16 chars of LINES[0]; confirms array was populated from invariants content.
+#   i           — sampled index; cross-check against pick/sum arithmetic.
+#   raw_i       — first 16 chars of LINES[i], the actually-selected slot; healthy first +
+#                 corrupt raw_i pins slot-specific corruption directly.
 TRACE="${HOME}/.claude-invariant-last"
 if [[ -f "$TRACE" && "$(wc -c < "$TRACE" 2>/dev/null || echo 0)" -gt 102400 ]]; then
   { tail -n 100 "$TRACE" > "${TRACE}.tmp" && mv "${TRACE}.tmp" "$TRACE"; } 2>/dev/null || true
 fi
 FILE_SHA="$( { md5sum "$INVARIANTS" 2>/dev/null || md5 -q "$INVARIANTS" 2>/dev/null; } | cut -d' ' -f1 || true )"
-printf '%s\tpick=%s\tsha=%s\tline=%.40s\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pick" "${FILE_SHA:-?}" "$LINE" \
+SCRIPT_SHA="$( { md5sum "${BASH_SOURCE[0]:-$0}" 2>/dev/null || md5 -q "${BASH_SOURCE[0]:-$0}" 2>/dev/null; } | cut -d' ' -f1 || true )"
+printf '%s\tpick=%s\tsha=%s\tscript_sha=%s\tlen=%s\tfirst=%.16s\ti=%s\traw_i=%.16s\tline=%.40s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pick" "${FILE_SHA:-?}" "${SCRIPT_SHA:-?}" \
+  "${#LINES[@]}" "${LINES[0]:-}" "${i:-?}" "${LINES[${i:-0}]:-}" "$LINE" \
   >> "$TRACE" 2>/dev/null || true
 ABORTED=0
 trap '[ "$ABORTED" -eq 1 ] || { ABORTED=1; printf "%s\tABORT\tpick=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${pick:-?}" >> "$TRACE" 2>/dev/null; }; true' ERR PIPE
