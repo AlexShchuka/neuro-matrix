@@ -1,0 +1,334 @@
+name: eval-ci
+
+# Runs the held-out eval suite (baseline vs candidate) on PRs that touch the
+# calibration files the suite is designed to measure. Posts a sticky comment
+# with per-probe scores and a tiered verdict.
+#
+# This workflow is ADDITIVE — it does not modify eval.yml (probe validation).
+
+on:
+  pull_request:
+    paths:
+      - 'CLAUDE.md'
+      - 'invariants.txt'
+      - 'agents/**'
+      - 'hooks/**'
+  workflow_dispatch:
+    inputs:
+      smoke:
+        description: 'Smoke run — 1 probe, k=1 (cheap live validation)'
+        type: boolean
+        default: false
+
+# Cancel in-progress runs for the same PR branch when a new push arrives.
+concurrency:
+  group: eval-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Guard: secrets are unavailable on fork PRs. Check before spending tokens.
+  # ---------------------------------------------------------------------------
+  check-secrets:
+    runs-on: ubuntu-latest
+    outputs:
+      has-token: ${{ steps.probe.outputs.has-token }}
+    steps:
+      - name: Probe for CLAUDE_CODE_OAUTH_TOKEN
+        id: probe
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        # Non-empty env var → token present. Empty → fork or secret not set.
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "has-token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-token=false" >> "$GITHUB_OUTPUT"
+            echo "CLAUDE_CODE_OAUTH_TOKEN is absent — skipping LLM eval (fork PR or secret not configured)."
+          fi
+
+  eval:
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has-token == 'true'
+    runs-on: ubuntu-latest
+
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # generation model: cheapest current haiku (owner decision)
+      GEN_MODEL: claude-haiku-4-5
+      # judge model: current sonnet; same-family bias documented in comment footer
+      JUDGE_MODEL: claude-sonnet-4-6
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Canary GUID masking — must run before any LLM calls or log output
+      # so GUIDs never appear in Actions logs even if a response leaks one.
+      # -----------------------------------------------------------------------
+      - name: Checkout (full history — run_suite.py needs git show on merge-base)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Mask canary GUIDs in Actions logs
+        # extract every UUID-shaped token from probe files and ::add-mask:: it
+        run: |
+          set -euo pipefail
+          guids=$(grep -hoE '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' \
+            eval/questions/q*.md eval/adversarial/adv*.md 2>/dev/null | sort -u || true)
+          for g in $guids; do
+            echo "::add-mask::$g"
+          done
+          echo "Masked $(echo "$guids" | grep -c . || echo 0) canary GUID(s)."
+
+      # -----------------------------------------------------------------------
+      # Resolve SHAs
+      # -----------------------------------------------------------------------
+      - name: Resolve merge-base and candidate SHAs
+        id: refs
+        env:
+          # Move github context values into env vars so they are never
+          # interpolated directly into shell — defence-in-depth even though
+          # commit SHAs are hex-only and have no injection surface.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_SHA_FALLBACK: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # candidate = PR head SHA (or the push SHA on workflow_dispatch)
+          CANDIDATE_SHA="${PR_HEAD_SHA:-$GITHUB_SHA_FALLBACK}"
+
+          # baseline = merge-base of origin/main and PR head (or HEAD on dispatch)
+          git fetch origin main --depth=0 2>/dev/null || true
+          BASELINE_SHA=$(git merge-base origin/main "$CANDIDATE_SHA" || echo "")
+          if [ -z "$BASELINE_SHA" ]; then
+            # workflow_dispatch from main: use parent commit as baseline
+            BASELINE_SHA=$(git rev-parse "${CANDIDATE_SHA}^")
+          fi
+
+          echo "baseline=$BASELINE_SHA" >> "$GITHUB_OUTPUT"
+          echo "candidate=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo "Baseline: $BASELINE_SHA"
+          echo "Candidate: $CANDIDATE_SHA"
+
+      # -----------------------------------------------------------------------
+      # Cache key for baseline results
+      # The cache key includes the merge-base SHA and a hash of all probe files
+      # so that adding/changing probes invalidates the cached baseline.
+      # -----------------------------------------------------------------------
+      - name: Compute probe-hash for cache key
+        id: probe-hash
+        run: |
+          set -euo pipefail
+          hash=$(cat eval/questions/*.md eval/adversarial/*.md 2>/dev/null \
+            | sha256sum | cut -d' ' -f1)
+          echo "value=$hash" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached baseline results
+        id: cache-baseline
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: baseline-cache/
+          key: baseline-${{ steps.refs.outputs.baseline }}-${{ steps.probe-hash.outputs.value }}
+
+      # -----------------------------------------------------------------------
+      # Install Claude CLI via npm
+      # -----------------------------------------------------------------------
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.x'
+
+      # -----------------------------------------------------------------------
+      # Determine k (runs per probe) — smoke mode uses k=1, normal uses k=3
+      # -----------------------------------------------------------------------
+      - name: Set k and probe count
+        id: params
+        env:
+          # workflow_dispatch boolean input — move to env var, never interpolate
+          # directly in shell even though GitHub enforces true/false values.
+          SMOKE_INPUT: ${{ github.event.inputs.smoke || 'false' }}
+        run: |
+          smoke="$SMOKE_INPUT"
+          if [ "$smoke" = "true" ]; then
+            echo "k=1" >> "$GITHUB_OUTPUT"
+            echo "probes=questions" >> "$GITHUB_OUTPUT"
+            echo "smoke_suffix= (smoke: 1 probe, k=1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "k=3" >> "$GITHUB_OUTPUT"
+            echo "probes=questions,adversarial" >> "$GITHUB_OUTPUT"
+            echo "smoke_suffix=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Run run_suite.py for baseline (skip if cached)
+      # -----------------------------------------------------------------------
+      - name: Generate baseline prompts + CSV stub
+        if: steps.cache-baseline.outputs.cache-hit != 'true'
+        env:
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
+          PROBES: ${{ steps.params.outputs.probes }}
+          K: ${{ steps.params.outputs.k }}
+        run: |
+          set -euo pipefail
+          mkdir -p baseline-cache
+          python3 eval/run_suite.py \
+            --refs "${BASELINE_SHA}=baseline" \
+            --probes "$PROBES" \
+            --k "$K" \
+            --out baseline-cache/results-baseline.csv \
+            --prompts-dir baseline-cache/prompts
+
+      - name: Generate baseline responses
+        if: steps.cache-baseline.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          python3 eval/ci_eval.py generate \
+            --csv baseline-cache/results-baseline.csv \
+            --model "$GEN_MODEL"
+
+      - name: Judge baseline responses
+        if: steps.cache-baseline.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          python3 eval/ci_eval.py judge \
+            --csv baseline-cache/results-baseline.csv \
+            --probes-dir eval \
+            --model "$JUDGE_MODEL"
+
+      # -----------------------------------------------------------------------
+      # Run run_suite.py for candidate
+      # -----------------------------------------------------------------------
+      - name: Generate candidate prompts + CSV stub
+        env:
+          CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
+          PROBES: ${{ steps.params.outputs.probes }}
+          K: ${{ steps.params.outputs.k }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate-out
+          python3 eval/run_suite.py \
+            --refs "${CANDIDATE_SHA}=candidate" \
+            --probes "$PROBES" \
+            --k "$K" \
+            --out candidate-out/results-candidate.csv \
+            --prompts-dir candidate-out/prompts
+
+      - name: Generate candidate responses
+        run: |
+          set -euo pipefail
+          python3 eval/ci_eval.py generate \
+            --csv candidate-out/results-candidate.csv \
+            --model "$GEN_MODEL"
+
+      - name: Judge candidate responses
+        run: |
+          set -euo pipefail
+          python3 eval/ci_eval.py judge \
+            --csv candidate-out/results-candidate.csv \
+            --probes-dir eval \
+            --model "$JUDGE_MODEL"
+
+      # -----------------------------------------------------------------------
+      # Merge CSVs and run statistical test
+      # -----------------------------------------------------------------------
+      - name: Merge baseline + candidate CSVs
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import csv, pathlib
+
+          out_path = pathlib.Path("merged-results.csv")
+          rows = []
+          for p in [
+              "baseline-cache/results-baseline.csv",
+              "candidate-out/results-candidate.csv",
+          ]:
+              with open(p, newline="", encoding="utf-8") as f:
+                  rows.extend(list(csv.DictReader(f)))
+
+          if not rows:
+              raise SystemExit("merged CSV is empty")
+
+          fieldnames = list(rows[0].keys())
+          with open(out_path, "w", newline="", encoding="utf-8") as f:
+              w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+              w.writeheader()
+              w.writerows(rows)
+
+          print(f"Merged {len(rows)} rows → {out_path}")
+          PY
+
+      - name: Run statistical test
+        run: |
+          set -euo pipefail
+          python3 eval/statistical_test.py merged-results.csv \
+            --baseline baseline \
+            --candidate candidate \
+            | tee stats-output.txt
+          # tee keeps stdout for the log; we also capture to file for comment
+
+      # -----------------------------------------------------------------------
+      # Canary leak check on merged responses
+      # -----------------------------------------------------------------------
+      - name: Check canary leaks in responses
+        # exit code from check-canary-leak is already part of the tiered verdict
+        # in ci_eval.py comment — capture output and let comment subcommand fail
+        run: |
+          set -euo pipefail
+          python3 scripts/check-canary-leak.py merged-results.csv \
+            | tee canary-output.txt || true
+
+      # -----------------------------------------------------------------------
+      # Format and post the sticky comment
+      # -----------------------------------------------------------------------
+      - name: Format PR comment
+        id: comment-body
+        env:
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
+          CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          python3 eval/ci_eval.py comment \
+            --csv merged-results.csv \
+            --baseline "$BASELINE_SHA" \
+            --candidate "$CANDIDATE_SHA" \
+            --stats-output stats-output.txt \
+            --canary-output canary-output.txt \
+            > comment-body.md
+          # capture exit code separately to detect job-fail verdict
+          echo "comment_exit=$?" >> "$GITHUB_OUTPUT" || true
+
+      - name: Post sticky PR comment
+        # Only post on actual pull_request events, not workflow_dispatch
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@0ea0beb66eb9baf113663a64ec522f60e49231c0 # v3.0.4
+        with:
+          header: eval-ci-results
+          path: comment-body.md
+
+      # -----------------------------------------------------------------------
+      # Enforce tiered verdict: fail the job on adversarial regression or canary
+      # -----------------------------------------------------------------------
+      - name: Enforce fail verdict
+        env:
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
+          CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          python3 eval/ci_eval.py comment \
+            --csv merged-results.csv \
+            --baseline "$BASELINE_SHA" \
+            --candidate "$CANDIDATE_SHA" \
+            --stats-output stats-output.txt \
+            --canary-output canary-output.txt \
+            > /dev/null
+          # ci_eval.py comment exits 1 on FAIL verdict, 0 on APPROVE/WARNING
