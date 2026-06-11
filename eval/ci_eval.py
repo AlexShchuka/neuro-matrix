@@ -937,7 +937,7 @@ def cmd_comment(args: argparse.Namespace) -> int:
         **{verdict}**
 
         ---
-        _Judge: same-family (Sonnet scoring Sonnet outputs). Same-family bias is a
+        _Judge: same-family (Haiku scoring Haiku outputs). Same-family bias is a
         documented accepted constraint — cross-family upgrade path: see
         [eval/README.md#validity-caveats](eval/README.md#validity-caveats)._
     """)
