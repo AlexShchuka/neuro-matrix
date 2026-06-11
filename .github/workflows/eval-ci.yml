@@ -10,6 +10,9 @@ name: eval-ci
 # the label stops auto-runs. Cheap deterministic checks (eval.yml) are always
 # unconditional and are NOT affected by this workflow.
 #
+# paths filter includes eval/** so a labeled probe-only PR re-runs eval with
+# the new measuring instrument applied to both calibrations.
+#
 # This workflow is ADDITIVE — it does not modify eval.yml (probe validation).
 
 on:
@@ -20,10 +23,11 @@ on:
       - 'invariants.txt'
       - 'agents/**'
       - 'hooks/**'
+      - 'eval/**'
   workflow_dispatch:
     inputs:
       smoke:
-        description: 'Smoke run — 1 probe, k=1 (cheap live validation)'
+        description: 'Smoke run — questions-only, k=1 (cheap live validation)'
         type: boolean
         default: false
 
@@ -175,7 +179,7 @@ jobs:
           if [ "$smoke" = "true" ]; then
             echo "k=1" >> "$GITHUB_OUTPUT"
             echo "probes=questions" >> "$GITHUB_OUTPUT"
-            echo "smoke_suffix= (smoke: 1 probe, k=1)" >> "$GITHUB_OUTPUT"
+            echo "smoke_suffix= (smoke: questions-only, k=1)" >> "$GITHUB_OUTPUT"
           else
             echo "k=3" >> "$GITHUB_OUTPUT"
             echo "probes=questions,adversarial" >> "$GITHUB_OUTPUT"
@@ -305,7 +309,6 @@ jobs:
       # Format and post the sticky comment
       # -----------------------------------------------------------------------
       - name: Format PR comment
-        id: comment-body
         env:
           BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
           CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
@@ -318,8 +321,6 @@ jobs:
             --stats-output stats-output.txt \
             --canary-output canary-output.txt \
             > comment-body.md
-          # capture exit code separately to detect job-fail verdict
-          echo "comment_exit=$?" >> "$GITHUB_OUTPUT" || true
 
       - name: Post sticky PR comment
         # Only post on actual pull_request events, not workflow_dispatch

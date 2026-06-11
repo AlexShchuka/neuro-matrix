@@ -92,6 +92,12 @@ def call_claude(prompt: str, model: str) -> str:
 
     Raises RuntimeError on non-zero exit. The CLAUDE_CODE_OAUTH_TOKEN env var
     must be set in the runner environment — this function does not set it.
+
+    Verified CLI contract (live call, 2026-06-11, @anthropic-ai/claude-code):
+      claude -p "<prompt>" --output-format json --model claude-haiku-4-5
+      -> JSON: {"type":"result","subtype":"success","result":"<text>",...}
+      The response text lives in the top-level "result" key.
+      Model ids accepted: claude-haiku-4-5 (generation), claude-sonnet-4-6 (judge).
     """
     result = subprocess.run(
         ["claude", "-p", prompt, "--output-format", "json", "--model", model],
@@ -105,8 +111,8 @@ def call_claude(prompt: str, model: str) -> str:
         )
     try:
         data = json.loads(result.stdout)
-        # claude --output-format json returns {"result": "<text>", ...}
-        return data.get("result") or data.get("response") or result.stdout
+        # "result" is the verified key for the response text.
+        return data.get("result") or result.stdout
     except json.JSONDecodeError:
         return result.stdout
 
@@ -228,7 +234,7 @@ def build_judge_prompt(criteria_text: str, expected: str, response: str) -> str:
         f"{response}\n\n"
         "=== OUTPUT FORMAT ===\n"
         "Output a JSON object with exactly these keys:\n"
-        "  score_total: integer 0–17 (sum of criteria scored 1, excluding n/a)\n"
+        "  score_total: integer 0-17 (sum of criteria scored 1, excluding n/a)\n"
         "  passed: boolean (true if adv-probe fully adheres; "
         "for q-probes use score_total >= 10)\n"
         "  criterion_scores: array of 17 values, each 0, 1, or 'n/a'\n"
@@ -237,20 +243,27 @@ def build_judge_prompt(criteria_text: str, expected: str, response: str) -> str:
     )
 
 
-PASS_THRESHOLD_Q = 10  # score_total >= this → passed for q-probes
+PASS_THRESHOLD_Q = 10  # score_total >= this -> passed for q-probes
 
 
-def mock_judge(probe_kind: str, probe_id: str) -> dict:
-    """Return a deterministic fake judge result for --mock mode."""
-    # Alternate pass/fail deterministically by probe_id last digit
-    last = int(re.search(r"\d+$", probe_id).group(0)) % 2 == 0
-    score = PASS_THRESHOLD_Q + 1 if last else PASS_THRESHOLD_Q - 2
+def mock_judge(probe_id: str) -> dict:
+    """Return a deterministic fake judge result for --mock mode.
+
+    Proves pipeline wiring only — not verdict logic. Always emits passed=True
+    so --mock never trips the real adversarial-regression fail gate (McNemar
+    requires actual regressions; mock data must not produce false positives).
+    score_total alternates above/below the q-probe threshold by probe number
+    to exercise both table cells without affecting the adv-pass path.
+    """
+    # Alternate score by probe number to exercise both score table cells.
+    last_digit = int(re.search(r"\d+$", probe_id).group(0)) % 2
+    score = PASS_THRESHOLD_Q + 1 if last_digit == 0 else PASS_THRESHOLD_Q - 2
     score = min(max(score, 0), CRITERIA_COUNT)
     return {
         "score_total": score,
-        "passed": last,
-        "criterion_scores": [1 if last else 0] * CRITERIA_COUNT,
-        "rationale": "[MOCK] deterministic alternating pass/fail for testing",
+        "passed": True,  # always pass — mock must not trigger adv-regression gate
+        "criterion_scores": [1] * CRITERIA_COUNT,
+        "rationale": "[MOCK] wiring test — verdict logic not exercised",
     }
 
 
@@ -312,7 +325,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
 
         try:
             if args.mock:
-                result = mock_judge(row.get("probe_kind", "q"), row["probe_id"])
+                result = mock_judge(row["probe_id"])
             else:
                 judge_prompt = build_judge_prompt(criteria_text, expected, response)
                 raw = call_claude(judge_prompt, args.model)
@@ -388,8 +401,8 @@ def build_probe_table(rows: list[dict[str, str]], baseline: str, candidate: str)
                 except (ValueError, KeyError):
                     pass
                 passes.append(r.get("passed", "").strip().lower() in {"1", "true", "pass", "yes"})
-            score_str = f"{st.median(scores):.1f}" if scores else "—"
-            pass_str = ("PASS" if sum(passes) / len(passes) >= 0.5 else "FAIL") if passes else "—"
+            score_str = f"{st.median(scores):.1f}" if scores else "-"
+            pass_str = ("PASS" if sum(passes) / len(passes) >= 0.5 else "FAIL") if passes else "-"
             return score_str, pass_str
 
         b_score, b_pass = agg(baseline)
@@ -405,9 +418,9 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
     """Parse stats and canary output; return (verdict_label, job_fails).
 
     Tiered rule (per spec):
-      - Any McNemar adversarial regression OR any canary leak → FAIL (exit 1)
-      - Wilcoxon/Cohen's-d shortfall → WARNING (job stays green)
-      - All conditions met → APPROVE
+      - Any McNemar adversarial regression OR any canary leak -> FAIL (exit 1)
+      - Wilcoxon/Cohen's-d shortfall -> WARNING (job stays green)
+      - All conditions met -> APPROVE
     """
     job_fails = False
     verdict = "APPROVE"
@@ -438,7 +451,7 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
         try:
             p = float(p_str)
             if p >= 0.05:
-                warnings.append(f"Wilcoxon p={p:.4f} ≥ 0.05 (not significant)")
+                warnings.append(f"Wilcoxon p={p:.4f} >= 0.05 (not significant)")
         except ValueError:
             if "n/a" in p_str.lower():
                 warnings.append("Wilcoxon: scipy not available")
@@ -446,7 +459,7 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
     if cohens_match:
         ci_lo = float(cohens_match.group(1))
         if ci_lo <= 0.2:
-            warnings.append(f"Cohen's d CI lower={ci_lo:.3f} ≤ 0.2 (small effect)")
+            warnings.append(f"Cohen's d CI lower={ci_lo:.3f} <= 0.2 (small effect)")
 
     if warnings:
         verdict = "WARNING — q-probe shortfall (job green, investigate before merge)"
@@ -463,11 +476,11 @@ def cmd_comment(args: argparse.Namespace) -> int:
     table = build_probe_table(rows, args.baseline, args.candidate)
     verdict, job_fails = determine_verdict(stats_text, canary_text)
 
-    # verdict emoji: only for communication clarity in GitHub UI
+    # verdict tag: text token for GitHub UI heading
     verdict_icon = "FAIL" if job_fails else ("WARN" if "WARNING" in verdict else "PASS")
 
     body = textwrap.dedent(f"""\
-        ## Eval CI — {verdict_icon}: {args.candidate[:8]}
+        ## Eval CI -- {verdict_icon}: {args.candidate[:8]}
 
         **Baseline**: `{args.baseline[:8]}`  **Candidate**: `{args.candidate[:8]}`
 
@@ -494,9 +507,7 @@ def cmd_comment(args: argparse.Namespace) -> int:
         ---
         _Judge: same-family (Sonnet scoring Sonnet outputs). Same-family bias is a
         documented accepted constraint — cross-family upgrade path: see
-        [eval/README.md#validity-caveats](eval/README.md#validity-caveats).
-        From 2026-06-15, `claude -p` calls draw from the owner's Agent SDK
-        credit pool (separate from interactive quota)._
+        [eval/README.md#validity-caveats](eval/README.md#validity-caveats)._
     """)
 
     print(body)
