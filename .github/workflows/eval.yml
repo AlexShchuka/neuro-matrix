@@ -1,0 +1,45 @@
+name: eval-probes
+
+# Validates the held-out eval probe files so a malformed or contaminating probe
+# fails CI instead of silently breaking the measurement suite.
+on:
+  push:
+    paths:
+      - 'eval/**'
+      - 'scripts/check-eval-probes.py'
+      - '.github/workflows/eval.yml'
+  pull_request:
+    paths:
+      - 'eval/**'
+      - 'scripts/check-eval-probes.py'
+      - '.github/workflows/eval.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Validate probe files (prompt + canary + uniqueness + no leak)
+        run: python3 scripts/check-eval-probes.py
+      - name: Probe suite parses under the runner
+        run: |
+          set -euo pipefail
+          python3 eval/run_suite.py --refs HEAD=ci --probes questions,adversarial \
+            --k 1 --out /tmp/eval-r.csv --prompts-dir /tmp/eval-p
+          # Guard against a vacuous green: the runner exits 0 and writes nothing
+          # if the calibration is empty — assert prompts were actually produced.
+          test -n "$(find /tmp/eval-p -name '*.txt' -print -quit)" \
+            || { echo 'FAIL: runner produced no prompts (empty calibration?)'; exit 1; }
+      - name: No canary GUID leaks into a generated prompt
+        run: |
+          set -euo pipefail
+          guids=$(grep -hoE '[0-9a-fA-F-]{36}' eval/questions/q*.md eval/adversarial/adv*.md | sort -u)
+          for g in $guids; do
+            if grep -rqF "$g" /tmp/eval-p; then
+              echo "FAIL: canary $g leaked into a generated prompt"; exit 1
+            fi
+          done
+          echo "no canary leaks in generated prompts"
