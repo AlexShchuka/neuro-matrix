@@ -42,7 +42,6 @@ Each item is anchored to a concrete repo location, confirmed by tool output.
 A PR ships repo files; the acts below are GitHub settings or external submissions only the maintainer can perform. Together with S2 they answer "why nobody sees it yet."
 
 - [ ] Set repo **About** (problem-focused one-liner) + up to 20 **topics**: `claude-code` `claude-code-plugin` `claude-code-marketplace` `ai-agents` `llm` `agentic-ai` `prompt-engineering` `hooks` `subagents` `ai-code-review` `anti-hallucination` `llm-evaluation` `developer-tools` `ai-safety` `constitutional-ai` `systems-thinking`.
-- [ ] Enable **GitHub Pages** (source: `/docs`) → landing indexed by search + AI engines; then point `homepage` in `marketplace.json` at the Pages URL.
 - [ ] Submit to the **Anthropic official directory** (`anthropics/claude-plugins-official`) via their submission form — expect a quality/security review (coordinate with issue #4 on what is exposed).
 - [ ] Open PRs into the live awesome-lists: `hesreallyhim/awesome-claude-code` (canonical), `ComposioHQ/awesome-claude-plugins`, `Chat2AnyLLM/awesome-claude-plugins`.
 - [ ] Check whether **claudemarketplaces.com** lists the repo (reportedly updated daily from GitHub; not independently verified).
