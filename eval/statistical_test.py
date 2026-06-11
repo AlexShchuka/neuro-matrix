@@ -171,7 +171,7 @@ def mcnemar_one_sided(b: list[float], c: list[float]) -> tuple[int, int, float]:
 
 
 def parse_criterion_scores(s: str) -> list[Optional[int]]:
-    """Parse a CSV string of 16 per-criterion scores.
+    """Parse a CSV string of 17 per-criterion scores.
 
     Accepts `0`, `1`, or `n/a` (`na`) per criterion — `n/a` means the
     criterion did not apply to this probe and the position is skipped by
