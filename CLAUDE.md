@@ -71,6 +71,7 @@ The table maps situations to **roles**. Current name bindings are shown for clar
 | Output review before push / MR-PR — the full branch diff, not per-commit (anti-neuroslop check) | **anti-neuroslop reviewer** (`@critic`) |
 | Critical review of an artifact (the plugin itself, an MR/PR diff, a design doc) — explicit «critically evaluate» / «review» / «assess» prompt | **anti-neuroslop reviewer** (`@critic`) — or invoke the critic-role invariants (#3, #6, #9, #19, #20, #22; from `scripts/role-invariants.sh critic`) locally if delegation is overkill |
 | Audit boundary between confirmed and associative claims; mutual-doubt checks | **epistemic auditor** (`@epistemic-auditor`) |
+| Codebook translation A↔D, RU↔EN for AI-facing files, session condensation, abstraction-ladder rewrite, invariant-table row drafts | **translator** (`@translator`) |
 | Unfamiliar domain term — cannot anchor in code within two greps | **system investigator**; if unresolvable, surface UNVERIFIED (do not invent meaning) |
 | Any step expected to take ≥3 tool calls (bulk read / search / build loops) | matching role agent — forced, invariant #26. Exceptions stay orchestrator-side: mutation gate / critic-marker flow, AskUserQuestion, memory writes; the «When NOT to delegate» list stays direct. |
 | Trivial code change in current context | Direct edit |

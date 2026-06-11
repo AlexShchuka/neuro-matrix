@@ -30,13 +30,14 @@ if [[ ! -f "$INVARIANTS" ]]; then
   exit 1
 fi
 
-KNOWN_ROLES="developer analyzer critic epistemic-auditor"
+KNOWN_ROLES="developer analyzer critic epistemic-auditor translator"
 role_invariants() {
   case "$1" in
     developer)         echo "1 2 4 14 19 20 22" ;;
     analyzer)          echo "1 12 13 19 20 22" ;;
     critic)            echo "3 6 9 19 20 22" ;;
     epistemic-auditor) echo "6 16 17 19 20 22" ;;
+    translator)        echo "1 6 19 22" ;;
     *)                 return 1 ;;
   esac
 }

@@ -1,0 +1,2 @@
+# bad3.jsonl — verdict = "MAYBE" -> FAIL SHAPE
+{"id": "I1", "a_view": "some view", "d_view": "some other view", "science_anchor": {"text": "some text", "source": "some source", "tag": "HYPO"}, "verdict": "MAYBE", "signed_by": []}
