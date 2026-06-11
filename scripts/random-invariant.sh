@@ -38,7 +38,7 @@ deontic_note() {
     *) echo "" ;;
   esac
 }
-declare -a LINES DEONTICS WEIGHTS
+declare -a INV_LINES DEONTICS WEIGHTS
 total=0
 ln=0
 
@@ -60,7 +60,7 @@ while IFS= read -r line; do
     w=1
     printf 'random-invariant: warning: untagged line %d sampled at style-weight (fallback); add [critical|important|style] prefix\n' "$ln" >&2
   fi
-  LINES+=("$line")
+  INV_LINES+=("$line")
   DEONTICS+=("$deontic")
   WEIGHTS+=("$w")
   total=$((total + w))
@@ -78,7 +78,7 @@ DEONTIC=""
 for i in "${!WEIGHTS[@]}"; do
   sum=$((sum + WEIGHTS[i]))
   if [[ "$pick" -lt "$sum" ]]; then
-    LINE="${LINES[$i]}"
+    LINE="${INV_LINES[$i]}"
     DEONTIC="${DEONTICS[$i]}"
     break
   fi
@@ -98,10 +98,10 @@ fi
 # Extended fields added for #21 discriminant (issue: bare "62" as invariant payload):
 #   script_sha  — md5 of this script itself (via BASH_SOURCE[0]); separates hypothesis A
 #                 (transient different script version) from B (array corruption same script).
-#   len         — ${#LINES[@]} at sample time; confirms parse completed correctly.
-#   first       — first 16 chars of LINES[0]; confirms array was populated from invariants content.
+#   len         — ${#INV_LINES[@]} at sample time; confirms parse completed correctly.
+#   first       — first 16 chars of INV_LINES[0]; confirms array was populated from invariants content.
 #   i           — sampled index; cross-check against pick/sum arithmetic.
-#   raw_i       — first 16 chars of LINES[i], the actually-selected slot; healthy first +
+#   raw_i       — first 16 chars of INV_LINES[i], the actually-selected slot; healthy first +
 #                 corrupt raw_i pins slot-specific corruption directly.
 TRACE="${HOME}/.claude-invariant-last"
 if [[ -f "$TRACE" && "$(wc -c < "$TRACE" 2>/dev/null || echo 0)" -gt 102400 ]]; then
@@ -111,7 +111,7 @@ FILE_SHA="$( { md5sum "$INVARIANTS" 2>/dev/null || md5 -q "$INVARIANTS" 2>/dev/n
 SCRIPT_SHA="$( { md5sum "${BASH_SOURCE[0]:-$0}" 2>/dev/null || md5 -q "${BASH_SOURCE[0]:-$0}" 2>/dev/null; } | cut -d' ' -f1 || true )"
 printf '%s\tpick=%s\tsha=%s\tscript_sha=%s\tlen=%s\tfirst=%.16s\ti=%s\traw_i=%.16s\tline=%.40s\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pick" "${FILE_SHA:-?}" "${SCRIPT_SHA:-?}" \
-  "${#LINES[@]}" "${LINES[0]:-}" "${i:-?}" "${LINES[${i:-0}]:-}" "$LINE" \
+  "${#INV_LINES[@]}" "${INV_LINES[0]:-}" "${i:-?}" "${INV_LINES[${i:-0}]:-}" "$LINE" \
   >> "$TRACE" 2>/dev/null || true
 ABORTED=0
 trap '[ "$ABORTED" -eq 1 ] || { ABORTED=1; printf "%s\tABORT\tpick=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${pick:-?}" >> "$TRACE" 2>/dev/null; }; true' ERR PIPE
