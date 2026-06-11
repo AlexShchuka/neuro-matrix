@@ -1,0 +1,2 @@
+# bad5.jsonl — MATCH with signed_by=["A"] only -> FAIL SIGNATURE
+{"id": "I1", "a_view": "some view", "d_view": "same", "science_anchor": {"text": "some text", "source": "some source", "tag": "HYPO"}, "verdict": "MATCH", "signed_by": ["A"]}

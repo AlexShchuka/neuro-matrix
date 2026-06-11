@@ -1,0 +1,2 @@
+# bad6.jsonl — signed_by=["A","X"] invalid signer -> FAIL SHAPE
+{"id": "I1", "a_view": "some view", "d_view": "same", "science_anchor": {"text": "some text", "source": "some source", "tag": "HYPO"}, "verdict": "DIVERGE", "signed_by": ["A", "X"]}

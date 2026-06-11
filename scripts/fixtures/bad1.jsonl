@@ -1,0 +1,2 @@
+# bad1.jsonl — FACT tag with empty source -> FAIL RETRIEVAL
+{"id": "I1", "a_view": "claimed fact with no anchor", "d_view": "same", "science_anchor": {"text": "some claimed fact", "source": "", "tag": "FACT"}, "verdict": "DIVERGE", "signed_by": []}
