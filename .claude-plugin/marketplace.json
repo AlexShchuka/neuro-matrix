@@ -15,7 +15,7 @@
       },
       "homepage": "https://github.com/AlexShchuka/neuro-matrix#readme",
       "repository": "https://github.com/AlexShchuka/neuro-matrix",
-      "license": "PolyForm-Noncommercial-1.0.0",
+      "license": "MIT",
       "keywords": [
         "claude-code",
         "claude-code-plugin",
