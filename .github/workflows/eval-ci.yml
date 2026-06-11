@@ -1,13 +1,20 @@
 name: eval-ci
 
-# Runs the held-out eval suite (baseline vs candidate) on PRs that touch the
-# calibration files the suite is designed to measure. Posts a sticky comment
-# with per-probe scores and a tiered verdict.
+# Runs the held-out eval suite (baseline vs candidate) and posts a sticky
+# comment with per-probe scores and a tiered verdict.
+#
+# LABEL-GATED: the LLM eval (generate / judge / stats / comment) only runs
+# when the `run-eval` label is present on the PR, or on workflow_dispatch.
+# Adding the label = owner approval for a full eval run. While the label
+# stays on the PR, subsequent pushes (synchronize) re-run the eval. Removing
+# the label stops auto-runs. Cheap deterministic checks (eval.yml) are always
+# unconditional and are NOT affected by this workflow.
 #
 # This workflow is ADDITIVE — it does not modify eval.yml (probe validation).
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'CLAUDE.md'
       - 'invariants.txt'
@@ -53,7 +60,14 @@ jobs:
 
   eval:
     needs: check-secrets
-    if: needs.check-secrets.outputs.has-token == 'true'
+    # Token must be present AND either: manual dispatch, or PR carries run-eval label.
+    # The label check is an expressions-layer contains() — never interpolated into shell.
+    if: |
+      needs.check-secrets.outputs.has-token == 'true' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.pull_request.labels.*.name, 'run-eval')
+      )
     runs-on: ubuntu-latest
 
     env:
