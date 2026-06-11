@@ -163,7 +163,7 @@ jobs:
           # produces a different hash than an empty file (absent ≠ empty).
           hash=$(python3 - <<'PY'
           import hashlib, subprocess, sys, os
-          sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath("eval/run_suite.py")), "eval"))
+          sys.path.insert(0, os.path.abspath("eval"))
           from run_suite import CALIB_FILES
           sha = hashlib.sha256()
           baseline_sha = os.environ["BASELINE_SHA"]
