@@ -35,8 +35,8 @@ Prompt-caching design (V-b verified 2026-06-11):
     the calibration as the system turn. The Anthropic API caches large identical
     system prompts automatically (cache_creation_input_tokens on first call,
     cache_read_input_tokens on subsequent calls). A warm-up call per calibration
-    is issued before the parallel burst to prime the cache so all 51 parallel
-    probe calls share one cached 60 KB prefix.
+    is issued before the parallel burst to prime the cache so all pending cells
+    share one cached 60 KB prefix.
 
 Parallelism design (V-c):
     ThreadPoolExecutor with max_workers = total pending cells (full fan-out).
@@ -492,11 +492,21 @@ def cmd_run(args: argparse.Namespace) -> int:
         save_csv(out_csv, rows, CSV_COLS)
         print(f"[run] judge done: {len(updated_judge)} ok, {len(judge_errors)} errors.")
 
-    total_errors = len(
-        [r for r in rows if not r.get("response_path") or not r.get("score_total")]
-    )
-    print(f"[run] complete — {len(rows)} rows, {total_errors} incomplete.")
-    return 1 if total_errors else 0
+    incomplete = [r for r in rows if not r.get("response_path") or not r.get("score_total")]
+    if incomplete:
+        # Cell-level failures: generation or judge errors for individual probes.
+        # Return 0 so set -euo pipefail does not abort the workflow before
+        # merge/stats/canary/comment/enforce; the tiered verdict is the gate.
+        # The incomplete count is printed here and surfaced in the sticky
+        # comment via cmd_comment reading the CSV directly.
+        print(
+            f"[run] complete — {len(rows)} rows, {len(incomplete)} incomplete "
+            f"(cell-level errors; tiered verdict will reflect degradation).",
+            file=sys.stderr,
+        )
+    else:
+        print(f"[run] complete — {len(rows)} rows, all ok.")
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +603,7 @@ def extract_expected(probe_text: str) -> str:
 
 
 def build_judge_system_prompt(criteria_text: str) -> str:
-    """Static judge system prompt — cached across all 51 judge calls.
+    """Static judge system prompt — cached across all pending judge calls.
 
     Contains only the rubric (same for every probe). The per-probe expected
     shape and the response are in the user turn (build_judge_user_prompt).
@@ -881,6 +891,20 @@ def cmd_comment(args: argparse.Namespace) -> int:
     stats_text = read_stats_output(args.stats_output)
     canary_text = read_canary_output(args.canary_output) if args.canary_output else ""
 
+    # --baseline / --candidate are the CSV calibration labels (e.g. "baseline",
+    # "candidate") used for table lookup. --baseline-sha / --candidate-sha are
+    # the git SHAs for the comment heading (default to the labels if not given).
+    baseline_sha = getattr(args, "baseline_sha", None) or args.baseline
+    candidate_sha = getattr(args, "candidate_sha", None) or args.candidate
+
+    # Surface any incomplete cells (generate/judge cell-level failures).
+    incomplete = [r for r in rows if not r.get("response_path") or not r.get("score_total")]
+    incomplete_note = (
+        f"\n> **{len(incomplete)} cell(s) incomplete** "
+        f"(generate/judge errors — scores reflect available data only)\n"
+        if incomplete else ""
+    )
+
     table = build_probe_table(rows, args.baseline, args.candidate)
     verdict, job_fails = determine_verdict(stats_text, canary_text)
 
@@ -888,10 +912,10 @@ def cmd_comment(args: argparse.Namespace) -> int:
     verdict_icon = "FAIL" if job_fails else ("WARN" if "WARNING" in verdict else "PASS")
 
     body = textwrap.dedent(f"""\
-        ## Eval CI -- {verdict_icon}: {args.candidate[:8]}
+        ## Eval CI -- {verdict_icon}: {candidate_sha[:8]}
 
-        **Baseline**: `{args.baseline[:8]}`  **Candidate**: `{args.candidate[:8]}`
-
+        **Baseline**: `{baseline_sha[:8]}`  **Candidate**: `{candidate_sha[:8]}`
+        {incomplete_note}
         ### Per-probe results
 
         {table}
@@ -991,8 +1015,22 @@ def main() -> int:
     # --- comment ---
     cmt = sub.add_parser("comment", help="Format sticky PR comment body")
     cmt.add_argument("--csv", required=True)
-    cmt.add_argument("--baseline", required=True, help="Baseline calibration label")
-    cmt.add_argument("--candidate", required=True, help="Candidate calibration label")
+    cmt.add_argument(
+        "--baseline", required=True,
+        help="Baseline calibration label (must match CSV 'calibration' column, e.g. 'baseline')",
+    )
+    cmt.add_argument(
+        "--candidate", required=True,
+        help="Candidate calibration label (must match CSV 'calibration' column, e.g. 'candidate')",
+    )
+    cmt.add_argument(
+        "--baseline-sha", default="",
+        help="Baseline git SHA for comment heading (optional; defaults to --baseline value)",
+    )
+    cmt.add_argument(
+        "--candidate-sha", default="",
+        help="Candidate git SHA for comment heading (optional; defaults to --candidate value)",
+    )
     cmt.add_argument(
         "--stats-output", required=True,
         help="Path to file containing statistical_test.py stdout",

@@ -292,10 +292,16 @@ jobs:
           CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
         run: |
           set -euo pipefail
+          # --baseline/--candidate are the CSV calibration labels used for table
+          # lookup; --baseline-sha/--candidate-sha are the git SHAs shown in the
+          # comment heading. Keeping them separate fixes the pre-existing bug where
+          # passing SHAs as labels caused every table cell to render as "-".
           python3 eval/ci_eval.py comment \
             --csv merged-results.csv \
-            --baseline "$BASELINE_SHA" \
-            --candidate "$CANDIDATE_SHA" \
+            --baseline baseline \
+            --candidate candidate \
+            --baseline-sha "$BASELINE_SHA" \
+            --candidate-sha "$CANDIDATE_SHA" \
             --stats-output stats-output.txt \
             --canary-output canary-output.txt \
             > comment-body.md
@@ -311,16 +317,14 @@ jobs:
       # Enforce tiered verdict — fails the job on regression or canary leak.
       # -----------------------------------------------------------------------
       - name: Enforce fail verdict
-        env:
-          BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
-          CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
         run: |
           set -euo pipefail
           python3 eval/ci_eval.py comment \
             --csv merged-results.csv \
-            --baseline "$BASELINE_SHA" \
-            --candidate "$CANDIDATE_SHA" \
+            --baseline baseline \
+            --candidate candidate \
             --stats-output stats-output.txt \
             --canary-output canary-output.txt \
             > /dev/null
           # ci_eval.py comment exits 1 on FAIL verdict, 0 on APPROVE/WARNING
+          # --baseline-sha/--candidate-sha omitted here (heading not needed for enforcement)

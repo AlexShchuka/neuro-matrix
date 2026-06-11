@@ -31,7 +31,10 @@ Prompt-caching mode (default):
     calibration hit the cache after the first warm-up call.
 
     Legacy mode (--legacy-prompts): calibration + probe are concatenated into
-    a single prompt_path file. Used by eval.yml probe-validation step.
+    a single prompt_path file (old behaviour). This is NOT used by eval.yml —
+    eval.yml calls run_suite.py without --legacy-prompts and validates the
+    caching-mode output format, which is the production format. --legacy-prompts
+    is a manual-compat flag only (e.g. for one-off debugging outside CI).
 
 Usage:
     python3 run_suite.py \\
