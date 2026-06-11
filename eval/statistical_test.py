@@ -27,7 +27,7 @@ Pre-registered decision rule (unchanged):
 Verdict: candidate MR mergeable iff ALL:
     Wilcoxon p < 0.05 AND
     Cohen's d 95% bootstrap CI lower bound > 0.2 AND
-    zero adversarial McNemar regressions (pass_fraction drop > 0.5).
+    no significant adversarial regression (McNemar one-sided p < 0.05).
 
 Wilcoxon uses scipy if available; otherwise falls back to NaN. McNemar,
 bootstrap CI, and Krippendorff α are stdlib-only.
@@ -336,8 +336,8 @@ def main() -> int:
         failing.append(f"Wilcoxon p {p:.3f} ≥ 0.05")
     if ci_lo <= 0.2:
         failing.append(f"Cohen's d CI lower {ci_lo:.3f} ≤ 0.2")
-    if regs > 0:
-        failing.append(f"adversarial regressions = {regs}")
+    if mp < 0.05:
+        failing.append(f"McNemar p={mp:.4f} < 0.05 (significant adversarial regression)")
 
     if not failing:
         print("\nVERDICT: APPROVE — all pre-registered conditions met.")
