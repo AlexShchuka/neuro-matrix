@@ -57,9 +57,9 @@ for i in $(seq 1 "$RUNS"); do
   deontic_header="$(printf '%s\n' "$output" | grep -m1 "^This invariant's deontic class: " || true)"
   if [[ -n "$deontic_header" ]]; then
     # Extract the class letter from the header: "deontic class: X ("
-    header_letter="$(printf '%s\n' "$deontic_header" | grep -oP "(?<=deontic class: )[OPF]" || true)"
-    # Extract the [OPF] tag from the payload line
-    payload_letter="$(printf '%s\n' "$payload" | grep -oP "(?<=\[)[OPF](?=\])" | head -1 || true)"
+    header_letter="$(printf '%s\n' "$deontic_header" | sed -n 's/.*deontic class: \([OPF]\).*/\1/p')"
+    # Extract the [OPF] tag from the payload line (second bracketed token, after [risk])
+    payload_letter="$(printf '%s\n' "$payload" | sed -n 's/^[^[]*\[[a-z]*\] \[\([OPF]\)\].*/\1/p')"
 
     if [[ -z "$header_letter" ]]; then
       printf 'FAIL  run %d [assertion-b]: could not parse deontic letter from header:\n  %s\n' \
