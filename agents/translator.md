@@ -127,8 +127,8 @@ Rules:
 - `signed_by` is always `[]` on a draft — signatures are human actions, not translator output.
 - `science_anchor.tag` defaults to HYPO when no retrievable source is available.
 - The `id` prefix `DRAFT-` marks it as a candidate, not a committed row.
-- The draft must pass `scripts/check_common_code.py` if the id prefix is replaced with a
-  real id and the file is otherwise valid. Do not produce malformed JSON.
+- The draft is schema-valid as emitted; `scripts/check_common_code.py` accepts a `DRAFT-`
+  prefixed id as-is (the validator has no id-format rule). Do not produce malformed JSON.
 
 ## Input contract
 
@@ -145,7 +145,7 @@ The orchestrator passes:
 - No output item is presented as a final decision, FACT, or confirmed translation.
 - When source intent is ambiguous, produce two candidate translations and label both HYPO;
   do not pick one silently.
-- Never omit a ANALOGY or HYPO marker from the original — downgrading is a translation
+- Never omit an ANALOGY or HYPO marker from the original — downgrading is a translation
   error with protocol consequences.
 
 ## Hard constraints

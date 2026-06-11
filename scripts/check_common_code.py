@@ -7,7 +7,6 @@ fail-closed, that the file can be trusted WITHOUT reading its content and WITHOU
   (a) SHAPE      each record is the three-sided object
                  {id, a_view, d_view, science_anchor{text, source, tag}, verdict, signed_by}
                  tag in {FACT, ANALOGY, HYPO, UNVERIFIED}; verdict in {MATCH, DIVERGE}
-                 a FACT tag requires a non-empty source token (anchored fact rule)
                  signed_by: JSON array, subset of {"A","D"}, no duplicates
   (b) BUDGET     hard volume caps  N_inv <= 30 ; per-cell length <= MAX_CELL chars
                  (anti-neuroslop: irrelevant/excess context degrades the AI -
@@ -142,9 +141,6 @@ def main():
         # (d) retrieval pointer: every anchor must carry a retrievable source.
         if not anchor["source"].strip():
             fail("RETRIEVAL", "science_anchor.source empty (not retrievable - drop)", where)
-        # anchored-fact rule: a FACT claim must name its source.
-        if anchor["tag"] == "FACT" and not anchor["source"].strip():
-            fail("ANCHOR", "[FACT] tag requires a non-empty source", where)
         records.append(rec)
 
     n = len(records)

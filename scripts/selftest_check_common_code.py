@@ -17,8 +17,10 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 VALIDATOR = os.path.join(HERE, "check_common_code.py")
 FIXTURES = os.path.join(HERE, "fixtures")
+REPO_ROOT = os.path.dirname(HERE)
 
-# (fixture_file, expected_exit_code, expected_fail_code_or_None)
+# (fixture_file_or_path, expected_exit_code, expected_fail_code_or_None)
+# Entries are either bare filenames (resolved under FIXTURES) or absolute paths.
 CASES = [
     ("good.jsonl",  0, None),
     ("bad1.jsonl",  1, "FAIL RETRIEVAL"),
@@ -27,11 +29,13 @@ CASES = [
     ("big.jsonl",   1, "FAIL BUDGET"),
     ("bad5.jsonl",  1, "FAIL SIGNATURE"),
     ("bad6.jsonl",  1, "FAIL SHAPE"),
+    # repo-root sample must always be valid (guards against sample rot)
+    (os.path.join(REPO_ROOT, "common-code.sample.jsonl"), 0, None),
 ]
 
 failures = []
 for filename, want_code, want_fail in CASES:
-    path = os.path.join(FIXTURES, filename)
+    path = filename if os.path.isabs(filename) else os.path.join(FIXTURES, filename)
     result = subprocess.run(
         [sys.executable, VALIDATOR, path],
         capture_output=True, text=True
