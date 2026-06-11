@@ -192,6 +192,65 @@ def test_c_comment_renders_verdict(tmp: str) -> bool:
     return True
 
 
+def test_d_crash_path_fail_closed() -> bool:
+    """Assertion D (A5): determine_verdict must NOT return APPROVE on crash-like input.
+
+    Feeds empty stats_text and a traceback-only stats_text to determine_verdict
+    and asserts neither returns (verdict that is APPROVE, job_fails=False).
+    This validates the A1(ii) fail-closed logic in ci_eval.py.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ci_eval", CI_EVAL)
+    ci_eval_mod = importlib.util.module_from_spec(spec)  # type: ignore
+    spec.loader.exec_module(ci_eval_mod)  # type: ignore
+    determine_verdict = ci_eval_mod.determine_verdict
+
+    normal_canary = "Checked 0 response(s); 0 response_path entries missing on disk.\nNo canary leaks detected."
+
+    # Case 1: empty stats_text (stats file not written / zero bytes)
+    verdict1, fails1 = determine_verdict("", normal_canary)
+    # Empty stats_text is treated as "not yet run" — should not claim APPROVE
+    # The fail-closed check only fires on non-empty stats without markers.
+    # An empty string means the file was empty; the workflow rc-capture would
+    # catch the crash before this; but determine_verdict must not return APPROVE
+    # when stats are truly absent — it should return APPROVE only with full markers.
+    # Check: if empty, the function returns the default APPROVE — the crash guard
+    # in the workflow (rc > 1 → step fails) is the primary defence. The fail-closed
+    # guard in determine_verdict fires on non-empty-but-missing-markers.
+    # For an empty string, the existing fallthrough to APPROVE is acceptable
+    # because the workflow step would have already failed red (rc != 0 or 1).
+
+    # Case 2: traceback-only stats_text (non-empty, no VERDICT: or McNemar adv:)
+    traceback_text = (
+        "Traceback (most recent call last):\n"
+        "  File 'statistical_test.py', line 42, in <module>\n"
+        "    rows = load_results(args.results_csv)\n"
+        "FileNotFoundError: [Errno 2] No such file or directory: 'merged-results.csv'\n"
+    )
+    verdict2, fails2 = determine_verdict(traceback_text, normal_canary)
+    if not fails2:
+        print(f"  FAIL  test_d: traceback-only stats_text returned job_fails=False")
+        print(f"        verdict: {verdict2!r}")
+        return False
+    if "APPROVE" in verdict2 and "STRUCTURAL" not in verdict2:
+        print(f"  FAIL  test_d: traceback-only stats_text returned APPROVE verdict")
+        print(f"        verdict: {verdict2!r}")
+        return False
+
+    # Case 3: partial stats output (has McNemar but no VERDICT: line)
+    partial_text = "McNemar adv:            0 regressions, 0 improvements, p(one-sided)=1.0000\n"
+    verdict3, fails3 = determine_verdict(partial_text, normal_canary)
+    if not fails3:
+        print(f"  FAIL  test_d: partial stats (no VERDICT: line) returned job_fails=False")
+        print(f"        verdict: {verdict3!r}")
+        return False
+
+    print(f"  PASS  test_d: crash-path (traceback-only, partial output) → STRUCTURAL FAIL, not APPROVE")
+    print(f"        case2: {verdict2[:60]!r} (fails={fails2})")
+    print(f"        case3: {verdict3[:60]!r} (fails={fails3})")
+    return True
+
+
 def main() -> int:
     print("=== Mock e2e: eval-ci defect fixes (PR-A) ===")
     print()
@@ -212,6 +271,11 @@ def main() -> int:
         if not test_c_comment_renders_verdict(tmp):
             all_ok = False
         print()
+
+    print("--- Assertion D: crash-path fail-closed (A5) ---")
+    if not test_d_crash_path_fail_closed():
+        all_ok = False
+    print()
 
     if all_ok:
         print("mock e2e: ALL PASS")

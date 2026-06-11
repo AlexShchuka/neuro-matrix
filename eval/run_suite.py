@@ -68,6 +68,18 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PLUGIN_DIR = SCRIPT_DIR.parent
 REPO_ROOT = PLUGIN_DIR
 
+# B4: single source of truth for the calibration file set.
+# The workflow's "Compute calibration-content hash" step mirrors this list;
+# any change here must be reflected there (and vice versa).
+CALIB_FILES: list[tuple[str, str]] = [
+    ("CLAUDE.md", "CLAUDE.md"),
+    ("invariants.txt", "invariants.txt"),
+    ("agents/developer.md", "agents/developer.md"),
+    ("agents/analyzer.md", "agents/analyzer.md"),
+    ("agents/critic.md", "agents/critic.md"),
+    ("agents/epistemic-auditor.md", "agents/epistemic-auditor.md"),
+]
+
 
 def git_show(ref: str, plugin_relpath: str) -> str | None:
     target = f"{ref}:{plugin_relpath}"
@@ -83,14 +95,7 @@ def git_show(ref: str, plugin_relpath: str) -> str | None:
 
 def calibration_content(ref: str) -> str:
     parts: list[str] = []
-    for relpath, label in [
-        ("CLAUDE.md", "CLAUDE.md"),
-        ("invariants.txt", "invariants.txt"),
-        ("agents/developer.md", "agents/developer.md"),
-        ("agents/analyzer.md", "agents/analyzer.md"),
-        ("agents/critic.md", "agents/critic.md"),
-        ("agents/epistemic-auditor.md", "agents/epistemic-auditor.md"),
-    ]:
+    for relpath, label in CALIB_FILES:
         content = git_show(ref, relpath)
         if content:
             parts.append(f"### {label}\n\n{content.strip()}")

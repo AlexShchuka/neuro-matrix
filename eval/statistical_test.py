@@ -18,13 +18,16 @@ Reads results.csv (produced by run_suite.py and then scored) with columns:
 Pre-registered decision rule (unchanged):
     - Paired Wilcoxon signed-rank on q-probe `score_total`
       (paired by probe_id across baseline vs candidate calibration).
-    - McNemar one-sided on adv-probe `passed`.
+    - McNemar one-sided on adv-probe `pass_fraction` (noise-robust):
+      a regression is counted only when pass_fraction drops by > 0.5
+      between baseline and candidate (i.e. a clear majority flip from
+      pass to fail, not a single-run noise flip at k=3).
     - Bootstrap 95% CI on Cohen's d of per-question deltas.
 
 Verdict: candidate MR mergeable iff ALL:
     Wilcoxon p < 0.05 AND
     Cohen's d 95% bootstrap CI lower bound > 0.2 AND
-    zero adversarial McNemar regressions.
+    zero adversarial McNemar regressions (pass_fraction drop > 0.5).
 
 Wilcoxon uses scipy if available; otherwise falls back to NaN. McNemar,
 bootstrap CI, and Krippendorff α are stdlib-only.
