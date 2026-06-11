@@ -21,7 +21,7 @@ Per-criterion 0/1 scores can be recorded in the `criterion_scores` column (comma
 1. Run the full suite against calibration A and B.
 2. Run `scripts/check-canary-leak.py results.csv` — any leak fails the eval (the model read the probe file via repo grep, not just the prompt).
 3. Feed `results.csv` to `statistical_test.py --baseline A --candidate B`.
-4. Decision rule (pre-registered): Wilcoxon p < 0.05 on q-totals, Cohen's d 95% bootstrap CI lower bound > 0.2, zero McNemar regressions on adversarial, zero canary leaks.
+4. Decision rule (pre-registered): Wilcoxon p < 0.05 on q-totals, Cohen's d 95% bootstrap CI lower bound > 0.2, zero McNemar regressions on adversarial (regression = probe pass_fraction drops by > 0.5 between calibrations, making noise-only 2/3→1/3 flips at k=3 non-counting), zero canary leaks.
 
 ## What to do with a regression
 

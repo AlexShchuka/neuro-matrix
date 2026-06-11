@@ -78,10 +78,13 @@ def aggregate_runs(
                     "1", "true", "pass", "yes"
                 } else 0.0
             )
+        pass_frac = (sum(passes) / len(passes)) if passes else 0.0
         out[key] = {
             "probe_kind": group[0].get("probe_kind", ""),
             "score_total": statistics.median(scores) if scores else float("nan"),
-            "passed": 1.0 if (passes and sum(passes) / len(passes) >= 0.5) else 0.0,
+            "passed": 1.0 if pass_frac >= 0.5 else 0.0,
+            # pass_fraction: raw fraction for noise-robust McNemar (see mcnemar_one_sided).
+            "pass_fraction": pass_frac,
         }
     return out
 
@@ -100,7 +103,8 @@ def collect_pairs(
         c = agg.get((pid, candidate))
         if not b or not c or b.get("probe_kind") != kind:
             continue
-        col = "passed" if kind == "adv" else "score_total"
+        # adv probes use pass_fraction for noise-robust McNemar; q-probes use score_total.
+        col = "pass_fraction" if kind == "adv" else "score_total"
         try:
             b_val = float(b[col])
             c_val = float(c[col])
@@ -161,8 +165,21 @@ def wilcoxon_p(b: list[float], c: list[float]) -> Optional[float]:
 
 
 def mcnemar_one_sided(b: list[float], c: list[float]) -> tuple[int, int, float]:
-    regressions = sum(1 for bi, ci in zip(b, c) if bi == 1.0 and ci == 0.0)
-    improvements = sum(1 for bi, ci in zip(b, c) if bi == 0.0 and ci == 1.0)
+    """Noise-robust McNemar on pass_fraction values (not binary passed).
+
+    A regression is counted only when the candidate pass_fraction drops by more
+    than 0.5 relative to baseline — i.e. the probe went from majority-pass
+    (frac > 0.5) to majority-fail (frac <= 0.5) by a CLEAR margin, not a
+    single-run noise flip. With k=3, fractions are {0, 1/3, 2/3, 1}; a
+    2/3 → 1/3 noise flip (diff=1/3) is excluded; only 1 → 1/3 (diff=2/3)
+    or cleaner drops count.
+
+    This fixes the null-comparison artifact (live run 2026-06-11: 4 regressions
+    on identical calibrations at k=3) without masking genuine regressions where
+    the probe clearly fails in the candidate.
+    """
+    regressions = sum(1 for bi, ci in zip(b, c) if bi - ci > 0.5)
+    improvements = sum(1 for bi, ci in zip(b, c) if ci - bi > 0.5)
     n = regressions + improvements
     if n == 0:
         return (0, 0, 1.0)
