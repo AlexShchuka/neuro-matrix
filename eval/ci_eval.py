@@ -875,13 +875,28 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
         )
         return verdict, job_fails
 
-    # McNemar adversarial regression
-    # statistical_test.py prints: "McNemar adv: N regressions, ..."
-    mcnemar_match = re.search(r"McNemar adv:\s+(\d+)\s+regressions", stats_text)
-    if mcnemar_match and int(mcnemar_match.group(1)) > 0:
-        job_fails = True
-        verdict = "FAIL — adversarial regression detected"
-        return verdict, job_fails
+    # McNemar adversarial regression — gate on the p-value, not the raw count.
+    # statistical_test.py prints: "McNemar adv: N regressions, M improvements, p(one-sided)=X.XXXX"
+    # A non-zero count with p=1.0000 (null comparison, judge noise at k=3) must not
+    # fail the job — only a statistically significant signal (p < 0.05) warrants FAIL.
+    # Fail-closed: if the McNemar line is present but the p-value is unparseable,
+    # treat as a structural failure (do not silently pass).
+    if "McNemar adv:" in stats_text:
+        mcnemar_p_match = re.search(r"McNemar adv:.*?p\(one-sided\)=([0-9.]+)", stats_text)
+        if mcnemar_p_match:
+            mp = float(mcnemar_p_match.group(1))
+            if mp < 0.05:
+                job_fails = True
+                verdict = f"FAIL — significant adversarial regression (McNemar p={mp:.4f} < 0.05)"
+                return verdict, job_fails
+        else:
+            # McNemar line present but p-value not parseable — structural failure.
+            job_fails = True
+            verdict = (
+                "FAIL — STRUCTURAL: McNemar line present but p-value unparseable "
+                "(possible format change or truncated output)"
+            )
+            return verdict, job_fails
 
     # Wilcoxon / Cohen's d shortfall — warning only, job stays green
     wilcoxon_match = re.search(r"Wilcoxon p \(q-totals\):\s+(\S+)", stats_text)

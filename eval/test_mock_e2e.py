@@ -123,7 +123,12 @@ def run_comment(csv_path: str, stats_txt: str, tmp: str) -> tuple[int, str]:
 # ---------------------------------------------------------------------------
 
 def test_a_null_comparison_zero_regressions(tmp: str) -> bool:
-    """Assertion A: identical calibrations → 0 adversarial regressions."""
+    """Assertion A: identical calibrations → 0 adversarial regressions, job green.
+
+    With the p-value gate, even if judge noise produces a non-zero raw count the
+    job must not fail when p >= 0.05.  The null comparison (identical calibrations,
+    all passed=1) produces pass_fraction=1.0 vs 1.0 → 0 regressions → p=1.0000.
+    """
     csv_path = null_comparison_csv(tmp)
     code, out = run_stat_test(csv_path)
     # Check the regressions count in output
@@ -131,7 +136,14 @@ def test_a_null_comparison_zero_regressions(tmp: str) -> bool:
         print(f"  FAIL  test_a: expected '0 regressions' in output")
         print(f"        output: {out[:400]}")
         return False
-    print(f"  PASS  test_a: null-comparison → 0 adv regressions (as expected)")
+    # With the p-value gate the stat test must NOT exit 1 on a null comparison.
+    # (It may exit 1 for Wilcoxon/Cohen's-d reasons, but for adv-only CSVs with
+    # no q-probes the McNemar condition is the only gate that could fire.)
+    if "McNemar p=" in out and "< 0.05" in out:
+        print(f"  FAIL  test_a: null-comparison triggered McNemar p<0.05 fail")
+        print(f"        output: {out[:400]}")
+        return False
+    print(f"  PASS  test_a: null-comparison → 0 adv regressions, McNemar gate green (as expected)")
     return True
 
 
@@ -251,6 +263,72 @@ def test_d_crash_path_fail_closed() -> bool:
     return True
 
 
+def test_e_significant_regression_fails() -> bool:
+    """Assertion E: stats text with p=0.0312 → determine_verdict returns job_fails=True.
+
+    Live-run fix: the gate is now on McNemar p < 0.05, not raw count > 0.
+    A result with 5 regressions and p=0.0312 IS significant and must fail.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ci_eval", CI_EVAL)
+    ci_eval_mod = importlib.util.module_from_spec(spec)  # type: ignore
+    spec.loader.exec_module(ci_eval_mod)  # type: ignore
+    determine_verdict = ci_eval_mod.determine_verdict
+
+    normal_canary = "Checked 0 response(s); 0 response_path entries missing on disk.\nNo canary leaks detected."
+    stats_text = (
+        "Pairs: q=0, adv=8 (baseline → candidate)\n"
+        "Wilcoxon p (q-totals):  n/a (scipy missing)\n"
+        "Cohen's d (paired):     0.000  [95% bootstrap CI: 0.000, 0.000]\n"
+        "McNemar adv:            5 regressions, 0 improvements, p(one-sided)=0.0312\n"
+        "\nVERDICT: FIX-REQUIRED — failing conditions:\n"
+        "  - McNemar p=0.0312 < 0.05 (significant adversarial regression)\n"
+    )
+    verdict, job_fails = determine_verdict(stats_text, normal_canary)
+    if not job_fails:
+        print(f"  FAIL  test_e: significant regression (p=0.0312) did not set job_fails=True")
+        print(f"        verdict: {verdict!r}")
+        return False
+    if "0.0312" not in verdict and "significant" not in verdict.lower():
+        print(f"  FAIL  test_e: verdict doesn't mention p-value or significance")
+        print(f"        verdict: {verdict!r}")
+        return False
+    print(f"  PASS  test_e: p=0.0312 → job_fails=True, verdict: {verdict[:70]!r}")
+    return True
+
+
+def test_f_nonsignificant_count_passes() -> bool:
+    """Assertion F: stats text with 1 regression p=1.0000 → determine_verdict green.
+
+    This is the exact live-run 27380314343 scenario: judge noise at k=3 produces
+    "1 regressions, 0 improvements, p(one-sided)=1.0000" on a null comparison.
+    Under the old count>0 gate this failed the job; under the new p<0.05 gate it
+    must not.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ci_eval", CI_EVAL)
+    ci_eval_mod = importlib.util.module_from_spec(spec)  # type: ignore
+    spec.loader.exec_module(ci_eval_mod)  # type: ignore
+    determine_verdict = ci_eval_mod.determine_verdict
+
+    normal_canary = "Checked 0 response(s); 0 response_path entries missing on disk.\nNo canary leaks detected."
+    # Exact format from live run 27380314343
+    stats_text = (
+        "Pairs: q=0, adv=6 (baseline → candidate)\n"
+        "Wilcoxon p (q-totals):  n/a (scipy missing)\n"
+        "Cohen's d (paired):     0.000  [95% bootstrap CI: 0.000, 0.000]\n"
+        "McNemar adv:            1 regressions, 0 improvements, p(one-sided)=1.0000\n"
+        "\nVERDICT: APPROVE — all pre-registered conditions met.\n"
+    )
+    verdict, job_fails = determine_verdict(stats_text, normal_canary)
+    if job_fails:
+        print(f"  FAIL  test_f: noise regression (p=1.0000) set job_fails=True (should be green)")
+        print(f"        verdict: {verdict!r}")
+        return False
+    print(f"  PASS  test_f: p=1.0000 noise regression → job_fails=False (green), verdict: {verdict[:60]!r}")
+    return True
+
+
 def main() -> int:
     print("=== Mock e2e: eval-ci defect fixes (PR-A) ===")
     print()
@@ -274,6 +352,16 @@ def main() -> int:
 
     print("--- Assertion D: crash-path fail-closed (A5) ---")
     if not test_d_crash_path_fail_closed():
+        all_ok = False
+    print()
+
+    print("--- Assertion E: significant regression (p=0.0312) → job_fails=True ---")
+    if not test_e_significant_regression_fails():
+        all_ok = False
+    print()
+
+    print("--- Assertion F: noise regression (p=1.0000) → job stays green ---")
+    if not test_f_nonsignificant_count_passes():
         all_ok = False
     print()
 
