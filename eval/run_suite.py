@@ -23,6 +23,16 @@ extracted and written to the CSV column `canary_guid`; downstream
 GUID in a response signals the model read the probe file (not just the
 prompt) via the surrounding repo.
 
+Prompt-caching mode (default):
+    Calibration content is written once per (calibration) to a shared file
+    (calib_path column). The probe-only user prompt is written per cell to
+    prompt_path. ci_eval.py passes calibration as --system-prompt (cached by
+    the API) and the probe as the user message, so all cells sharing the same
+    calibration hit the cache after the first warm-up call.
+
+    Legacy mode (--legacy-prompts): calibration + probe are concatenated into
+    a single prompt_path file. Used by eval.yml probe-validation step.
+
 Usage:
     python3 run_suite.py \\
         --refs <sha-or-ref>=baseline,HEAD=candidate \\
@@ -32,8 +42,11 @@ Usage:
         --prompts-dir prompts/
 
 CSV columns:
-    probe_id, calibration, probe_kind, run_idx, prompt_path,
-    response_path, score_total, passed, canary_guid
+    probe_id, calibration, probe_kind, run_idx, prompt_path, calib_path,
+    response_path, score_total, passed, canary_guid, criterion_scores
+
+    calib_path — path to calibration file (system-prompt content); empty in
+    legacy mode.
 
 Score the responses against eval/criteria.md (binary 0/1), fill
 response_path / score_total / passed (and optionally rater /
@@ -130,13 +143,24 @@ def extract_canary(text: str) -> str:
     return m.group(0) if m else body.split()[0]
 
 
-def build_prompt(calibration: str, prompt_body: str) -> str:
+def build_legacy_prompt(calibration: str, prompt_body: str) -> str:
+    """Concatenated prompt used in legacy mode and eval.yml probe validation."""
     return (
         "Below is your operational protocol for this turn. Read it before "
         "answering. Then answer the prompt that follows, strictly applying "
         "the protocol.\n\n"
         "================ PROTOCOL ================\n\n"
         f"{calibration}\n\n"
+        "================ PROMPT ================\n\n"
+        f"{prompt_body}\n"
+    )
+
+
+def build_user_prompt(prompt_body: str) -> str:
+    """User-side prompt for caching mode — probe only, no calibration prefix."""
+    return (
+        "Answer the following prompt, strictly applying the operational "
+        "protocol in your system prompt.\n\n"
         "================ PROMPT ================\n\n"
         f"{prompt_body}\n"
     )
@@ -155,6 +179,13 @@ def main() -> int:
     ap.add_argument("--k", type=int, default=1, help="Runs per (probe × calibration). Default 1.")
     ap.add_argument("--out", default="results.csv")
     ap.add_argument("--prompts-dir", default="prompts")
+    ap.add_argument(
+        "--legacy-prompts", action="store_true",
+        help=(
+            "Write calibration + probe concatenated into prompt_path (old behaviour). "
+            "calib_path column will be empty. Used by eval.yml probe-validation step."
+        ),
+    )
     args = ap.parse_args()
 
     if args.k < 1:
@@ -182,47 +213,70 @@ def main() -> int:
             continue
         out_dir = prompts_root / label
         out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write calibration file once per calibration label (caching mode).
+        calib_path_str = ""
+        if not args.legacy_prompts:
+            calib_file = out_dir / "_calibration.txt"
+            calib_file.write_text(calib, encoding="utf-8")
+            calib_path_str = str(calib_file)
+
         for probe_path in probes:
             pid = probe_path.stem
             text = probe_path.read_text(encoding="utf-8")
             prompt_body = extract_probe_prompt(text)
             canary = extract_canary(text)
-            prompt = build_prompt(calib, prompt_body)
+
             for run in range(args.k):
                 fname = f"{pid}.txt" if args.k == 1 else f"{pid}_r{run}.txt"
-                (out_dir / fname).write_text(prompt, encoding="utf-8")
+                if args.legacy_prompts:
+                    prompt = build_legacy_prompt(calib, prompt_body)
+                    (out_dir / fname).write_text(prompt, encoding="utf-8")
+                else:
+                    user_prompt = build_user_prompt(prompt_body)
+                    (out_dir / fname).write_text(user_prompt, encoding="utf-8")
+
                 csv_rows.append({
                     "probe_id": pid,
                     "calibration": label,
                     "probe_kind": "adv" if pid.startswith("adv") else "q",
                     "run_idx": str(run),
                     "prompt_path": str(out_dir / fname),
+                    "calib_path": calib_path_str,
                     "response_path": "",
                     "score_total": "",
                     "passed": "",
                     "canary_guid": canary,
+                    "criterion_scores": "",
                 })
 
     cols = [
         "probe_id", "calibration", "probe_kind", "run_idx",
-        "prompt_path", "response_path", "score_total", "passed",
-        "canary_guid",
+        "prompt_path", "calib_path", "response_path",
+        "score_total", "passed", "canary_guid", "criterion_scores",
     ]
     with open(args.out, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         w.writerows(csv_rows)
 
+    mode = "legacy" if args.legacy_prompts else "caching"
     print(
         f"Wrote {len(csv_rows)} prompts under {prompts_root}/ "
-        f"and stub results to {args.out}."
+        f"and stub results to {args.out} [{mode} mode]."
     )
-    print(
-        "Next: send each prompt to Claude (API / CLI / sub-agent), capture "
-        "response, score against eval/criteria.md, fill response_path / "
-        "score_total / passed. Then run scripts/check-canary-leak.py and "
-        "statistical_test.py."
-    )
+    if not args.legacy_prompts:
+        print(
+            "Calibration system prompts written to <label>/_calibration.txt — "
+            "pass calib_path as --system-prompt to claude for cache reuse."
+        )
+    else:
+        print(
+            "Next: send each prompt to Claude (API / CLI / sub-agent), capture "
+            "response, score against eval/criteria.md, fill response_path / "
+            "score_total / passed. Then run scripts/check-canary-leak.py and "
+            "statistical_test.py."
+        )
     return 0
 
 

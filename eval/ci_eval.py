@@ -2,41 +2,59 @@
 """
 CI eval pipeline — Layer E glue for GitHub Actions.
 
-Three subcommands run sequentially in the workflow:
+Subcommands:
 
-    generate   Loop over prompt files in results.csv, call `claude -p` for each
-               row where response_path is empty, write response text to disk,
-               update response_path in the CSV.
+    run        Full pipeline: materialise → generate → judge for one calibration
+               (baseline or candidate), fully parallel, with prompt-cache warm-up.
+               Writes a self-contained CSV ready for statistical_test.py.
 
-    judge      Score each response against the 17 criteria (eval/criteria.md)
-               plus the probe's Expected shape / Expected adherence section,
-               fill score_total, passed, criterion_scores.
+               Usage:
+                   python3 eval/ci_eval.py run \\
+                       --ref <sha>=<label> \\
+                       --probes questions,adversarial \\
+                       --k 3 \\
+                       --out results.csv \\
+                       --gen-model claude-haiku-4-5 \\
+                       --judge-model claude-sonnet-4-6 \\
+                       [--mock] [--prompts-dir /tmp/prompts]
+
+    generate   (legacy) Loop over prompt files in results.csv, call `claude -p`
+               for each row where response_path is empty, write response text to
+               disk, update response_path in the CSV.
+
+    judge      (legacy) Score each response against the 17 criteria.
 
     comment    Read the scored CSV + statistical_test.py output and format the
                sticky PR comment body (Markdown), printed to stdout.
 
-All three honour `--mock` to fake LLM calls so the full pipeline can be
+All subcommands honour `--mock` to fake LLM calls so the full pipeline can be
 exercised locally without credentials.
 
-Usage:
-    python3 eval/ci_eval.py generate --csv results.csv \\
-        --model claude-haiku-4-5 [--mock]
+Prompt-caching design (V-b verified 2026-06-11):
+    `claude -p` with `--system-prompt <text>` + `--output-format json` sends
+    the calibration as the system turn. The Anthropic API caches large identical
+    system prompts automatically (cache_creation_input_tokens on first call,
+    cache_read_input_tokens on subsequent calls). A warm-up call per calibration
+    is issued before the parallel burst to prime the cache so all 51 parallel
+    probe calls share one cached 60 KB prefix.
 
-    python3 eval/ci_eval.py judge --csv results.csv \\
-        --probes-dir eval/ --model claude-sonnet-4-6 [--mock]
-
-    python3 eval/ci_eval.py comment --csv results.csv \\
-        --baseline baseline --candidate candidate \\
-        --stats-output stats.txt [--canary-output canary.txt]
+Parallelism design (V-c):
+    ThreadPoolExecutor with max_workers = total pending cells (full fan-out).
+    Override with EVAL_MAX_WORKERS env var for emergency throttling.
+    Retryable errors (overload / 429-shaped) get one retry with 5 s backoff.
 """
 
 import argparse
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import textwrap
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
@@ -78,20 +96,94 @@ def save_csv(path: str, rows: list[dict[str, str]], fieldnames: list[str]) -> No
 
 CSV_COLS = [
     "probe_id", "calibration", "probe_kind", "run_idx",
+    "prompt_path", "calib_path", "response_path",
+    "score_total", "passed", "canary_guid", "criterion_scores",
+]
+
+# Columns present in legacy CSVs (no calib_path / criterion_scores).
+# save_csv uses extrasaction="ignore" so missing keys are fine.
+LEGACY_CSV_COLS = [
+    "probe_id", "calibration", "probe_kind", "run_idx",
     "prompt_path", "response_path", "score_total", "passed",
     "canary_guid", "criterion_scores",
 ]
 
 
 # ---------------------------------------------------------------------------
-# subcommand: generate
+# LLM call — caching-aware split call
 # ---------------------------------------------------------------------------
 
-def call_claude(prompt: str, model: str) -> str:
-    """Call `claude -p` with the given prompt; return response text.
+# Errors whose text indicates the request is retryable.
+_RETRYABLE_PATTERNS = re.compile(
+    r"overload|rate.limit|429|503|unavailable|try.again",
+    re.IGNORECASE,
+)
 
-    Raises RuntimeError on non-zero exit. The CLAUDE_CODE_OAUTH_TOKEN env var
-    must be set in the runner environment — this function does not set it.
+CALL_TIMEOUT_SEC = 180
+RETRY_BACKOFF_SEC = 5
+
+
+def call_claude_split(
+    system_prompt: str,
+    user_prompt: str,
+    model: str,
+    *,
+    timeout: int = CALL_TIMEOUT_SEC,
+) -> str:
+    """Call `claude -p` with separate system/user prompts; return response text.
+
+    Passes the calibration as --system-prompt so the Anthropic API can cache
+    the large 60 KB prefix. The user_prompt is the small per-probe text.
+
+    CLI contract (verified live 2026-06-11, @anthropic-ai/claude-code):
+      claude -p "<user>" --system-prompt "<system>" --output-format json
+              --model <model>
+      JSON response: {"type":"result","subtype":"success","result":"<text>",...}
+      usage.cache_read_input_tokens > 0 on subsequent calls with same system.
+
+    Raises RuntimeError on non-zero exit. One retry on retryable patterns.
+    """
+    cmd = [
+        "claude", "-p", user_prompt,
+        "--system-prompt", system_prompt,
+        "--output-format", "json",
+        "--model", model,
+    ]
+    for attempt in range(2):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 0:
+                time.sleep(RETRY_BACKOFF_SEC)
+                continue
+            raise RuntimeError(f"claude timed out after {timeout}s")
+
+        if result.returncode == 0:
+            try:
+                data = json.loads(result.stdout)
+                return data.get("result") or result.stdout
+            except json.JSONDecodeError:
+                return result.stdout
+
+        combined = result.stdout + result.stderr
+        if attempt == 0 and _RETRYABLE_PATTERNS.search(combined):
+            time.sleep(RETRY_BACKOFF_SEC)
+            continue
+
+        raise RuntimeError(
+            f"claude exited {result.returncode}:\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+    raise RuntimeError("claude failed after retry")
+
+
+def call_claude(prompt: str, model: str) -> str:
+    """Call `claude -p` with a single concatenated prompt (legacy path).
 
     Verified CLI contract (live call, 2026-06-11, @anthropic-ai/claude-code):
       claude -p "<prompt>" --output-format json --model claude-haiku-4-5
@@ -103,6 +195,7 @@ def call_claude(prompt: str, model: str) -> str:
         ["claude", "-p", prompt, "--output-format", "json", "--model", model],
         capture_output=True,
         text=True,
+        timeout=CALL_TIMEOUT_SEC,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -111,7 +204,6 @@ def call_claude(prompt: str, model: str) -> str:
         )
     try:
         data = json.loads(result.stdout)
-        # "result" is the verified key for the response text.
         return data.get("result") or result.stdout
     except json.JSONDecodeError:
         return result.stdout
@@ -126,6 +218,290 @@ def mock_generation(probe_id: str, calibration: str, run_idx: str) -> str:
         "It does not reflect real model output."
     )
 
+
+# ---------------------------------------------------------------------------
+# subcommand: run  (unified parallel pipeline)
+# ---------------------------------------------------------------------------
+
+def _run_suite_materialize(
+    ref: str,
+    label: str,
+    probes: str,
+    k: int,
+    out_csv: str,
+    prompts_dir: str,
+) -> int:
+    """Call run_suite.py to materialise prompts and write the stub CSV."""
+    cmd = [
+        sys.executable,
+        str(SCRIPT_DIR / "run_suite.py"),
+        "--refs", f"{ref}={label}",
+        "--probes", probes,
+        "--k", str(k),
+        "--out", out_csv,
+        "--prompts-dir", prompts_dir,
+    ]
+    result = subprocess.run(cmd, capture_output=False)
+    return result.returncode
+
+
+def _generate_one(
+    row: dict[str, str],
+    model: str,
+    responses_dir: Path,
+    mock: bool,
+    idx: int,
+    total: int,
+) -> tuple[dict[str, str], str | None]:
+    """Generate response for one CSV row. Returns (updated_row, error_str|None)."""
+    prompt_path = row.get("prompt_path", "").strip()
+    calib_path = row.get("calib_path", "").strip()
+    probe_id = row["probe_id"]
+    calibration = row["calibration"]
+    run_idx = row.get("run_idx", "0")
+    label = f"{probe_id}/{calibration}/r{run_idx}"
+
+    t0 = time.monotonic()
+    try:
+        if mock:
+            text = mock_generation(probe_id, calibration, run_idx)
+        elif calib_path and Path(calib_path).exists() and Path(prompt_path).exists():
+            # Caching path: system = calibration, user = probe prompt
+            system_text = Path(calib_path).read_text(encoding="utf-8")
+            user_text = Path(prompt_path).read_text(encoding="utf-8")
+            text = call_claude_split(system_text, user_text, model)
+        elif prompt_path and Path(prompt_path).exists():
+            # Fallback: legacy concatenated prompt
+            text = call_claude(Path(prompt_path).read_text(encoding="utf-8"), model)
+        else:
+            elapsed = time.monotonic() - t0
+            return row, f"missing prompt file for {label} ({elapsed:.1f}s)"
+
+        fname = f"{probe_id}_{calibration}_r{run_idx}.txt"
+        resp_path = responses_dir / fname
+        resp_path.write_text(text, encoding="utf-8")
+        row = dict(row)
+        row["response_path"] = str(resp_path)
+        elapsed = time.monotonic() - t0
+        print(f"  [{idx}/{total}] generate {label} -> ok ({elapsed:.1f}s)")
+        return row, None
+
+    except Exception as exc:
+        elapsed = time.monotonic() - t0
+        return row, f"{label} ({elapsed:.1f}s): {exc}"
+
+
+def _judge_one(
+    row: dict[str, str],
+    model: str,
+    criteria_system: str,
+    mock: bool,
+    idx: int,
+    total: int,
+) -> tuple[dict[str, str], str | None]:
+    """Judge one scored response. Returns (updated_row, error_str|None)."""
+    probe_id = row["probe_id"]
+    calibration = row["calibration"]
+    run_idx = row.get("run_idx", "0")
+    label = f"{probe_id}/{calibration}/r{run_idx}"
+
+    resp_path_str = row.get("response_path", "").strip()
+    t0 = time.monotonic()
+    try:
+        if mock:
+            result = mock_judge(probe_id)
+        else:
+            if not resp_path_str or not Path(resp_path_str).exists():
+                return row, f"missing response for {label}"
+            probe_file = find_probe_file(probe_id, SCRIPT_DIR)
+            if probe_file is None:
+                return row, f"probe file not found for {probe_id}"
+            probe_text = probe_file.read_text(encoding="utf-8")
+            expected = extract_expected(probe_text)
+            response = Path(resp_path_str).read_text(encoding="utf-8")
+            # Judge call: system = criteria rubric (cached), user = expected + response
+            user_prompt = build_judge_user_prompt(expected, response)
+            raw = call_claude_split(criteria_system, user_prompt, model)
+            result = parse_judge_output(raw)
+
+        row = dict(row)
+        row["score_total"] = str(result.get("score_total", ""))
+        row["passed"] = "1" if result.get("passed") else "0"
+        cs = result.get("criterion_scores", [])
+        row["criterion_scores"] = ",".join(str(v) for v in cs)
+        elapsed = time.monotonic() - t0
+        print(
+            f"  [{idx}/{total}] judge {label} -> "
+            f"score={row['score_total']} passed={row['passed']} ({elapsed:.1f}s)"
+        )
+        return row, None
+
+    except Exception as exc:
+        elapsed = time.monotonic() - t0
+        return row, f"{label} ({elapsed:.1f}s): {exc}"
+
+
+def _warmup_call(system_text: str, model: str, label: str) -> None:
+    """Prime the cache for a calibration by making one minimal call."""
+    print(f"  [warmup] {label} priming cache ...")
+    t0 = time.monotonic()
+    try:
+        call_claude_split(system_text, "respond with: ready", model)
+        elapsed = time.monotonic() - t0
+        print(f"  [warmup] {label} cached ({elapsed:.1f}s)")
+    except Exception as exc:
+        elapsed = time.monotonic() - t0
+        print(f"  [warmup] {label} failed ({elapsed:.1f}s): {exc}", file=sys.stderr)
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Unified parallel pipeline: materialise → warmup → generate → judge."""
+    ref_pair = args.ref.split("=", 1)
+    if len(ref_pair) != 2:
+        print("--ref must be <git-ref>=<label>", file=sys.stderr)
+        return 2
+    ref, label = ref_pair
+
+    prompts_dir = args.prompts_dir or tempfile.mkdtemp(prefix="eval-prompts-")
+    out_csv = args.out
+
+    # --- Materialise ---
+    print(f"[run] materialising prompts for {label} ...")
+    rc = _run_suite_materialize(
+        ref=ref,
+        label=label,
+        probes=args.probes,
+        k=args.k,
+        out_csv=out_csv,
+        prompts_dir=prompts_dir,
+    )
+    if rc != 0:
+        print(f"[run] run_suite.py failed (rc={rc})", file=sys.stderr)
+        return rc
+
+    rows = load_csv(out_csv)
+    pending_gen = [r for r in rows if not r.get("response_path", "").strip()]
+    total_gen = len(pending_gen)
+
+    if not pending_gen:
+        print("[run] all responses already generated — skipping generate phase.")
+    else:
+        responses_dir = Path(out_csv).parent / "responses"
+        responses_dir.mkdir(parents=True, exist_ok=True)
+
+        # --- Warm-up: prime cache per calibration ---
+        if not args.mock:
+            calib_paths: dict[str, str] = {}
+            for r in pending_gen:
+                cp = r.get("calib_path", "").strip()
+                cal = r["calibration"]
+                if cp and cal not in calib_paths:
+                    calib_paths[cal] = cp
+            for cal, cp in calib_paths.items():
+                system_text = Path(cp).read_text(encoding="utf-8")
+                _warmup_call(system_text, args.gen_model, cal)
+
+        # --- Parallel generate ---
+        max_workers = int(os.environ.get("EVAL_MAX_WORKERS", str(total_gen)))
+        print(f"[run] generating {total_gen} responses (workers={max_workers}) ...")
+        gen_errors: list[str] = []
+        updated_rows: dict[int, dict[str, str]] = {}
+
+        # Build index map: row identity → position in rows list
+        row_index: dict[int, int] = {}
+        pending_idx = 0
+        for i, r in enumerate(rows):
+            if not r.get("response_path", "").strip():
+                row_index[pending_idx] = i
+                pending_idx += 1
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {
+                executor.submit(
+                    _generate_one, r, args.gen_model, responses_dir,
+                    args.mock, idx + 1, total_gen,
+                ): idx
+                for idx, r in enumerate(pending_gen)
+            }
+            for future in as_completed(future_to_idx):
+                pending_pos = future_to_idx[future]
+                updated_row, err = future.result()
+                if err:
+                    gen_errors.append(err)
+                    print(f"  ERROR generate: {err}", file=sys.stderr)
+                else:
+                    updated_rows[row_index[pending_pos]] = updated_row
+
+        for pos, updated in updated_rows.items():
+            rows[pos] = updated
+
+        save_csv(out_csv, rows, CSV_COLS)
+        print(f"[run] generate done: {len(updated_rows)} ok, {len(gen_errors)} errors.")
+
+    # --- Judge phase ---
+    rows = load_csv(out_csv)
+    pending_judge = [r for r in rows if not r.get("score_total", "").strip()]
+    total_judge = len(pending_judge)
+
+    if not pending_judge:
+        print("[run] all responses already judged — skipping judge phase.")
+    else:
+        probes_dir = SCRIPT_DIR
+        criteria_text = load_criteria(probes_dir)
+
+        # Build judge system prompt: static rubric only (cached across all calls).
+        judge_system = build_judge_system_prompt(criteria_text)
+
+        # Warm-up for judge model (same criteria prefix, different model).
+        if not args.mock:
+            _warmup_call(judge_system, args.judge_model, f"judge-rubric ({label})")
+
+        max_workers = int(os.environ.get("EVAL_MAX_WORKERS", str(total_judge)))
+        print(f"[run] judging {total_judge} responses (workers={max_workers}) ...")
+        judge_errors: list[str] = []
+        updated_judge: dict[int, dict[str, str]] = {}
+
+        # Build pending-to-rows mapping
+        judge_index: dict[int, int] = {}
+        pending_j_idx = 0
+        for i, r in enumerate(rows):
+            if not r.get("score_total", "").strip():
+                judge_index[pending_j_idx] = i
+                pending_j_idx += 1
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {
+                executor.submit(
+                    _judge_one, r, args.judge_model, judge_system,
+                    args.mock, idx + 1, total_judge,
+                ): idx
+                for idx, r in enumerate(pending_judge)
+            }
+            for future in as_completed(future_to_idx):
+                pending_pos = future_to_idx[future]
+                updated_row, err = future.result()
+                if err:
+                    judge_errors.append(err)
+                    print(f"  ERROR judge: {err}", file=sys.stderr)
+                else:
+                    updated_judge[judge_index[pending_pos]] = updated_row
+
+        for pos, updated in updated_judge.items():
+            rows[pos] = updated
+
+        save_csv(out_csv, rows, CSV_COLS)
+        print(f"[run] judge done: {len(updated_judge)} ok, {len(judge_errors)} errors.")
+
+    total_errors = len(
+        [r for r in rows if not r.get("response_path") or not r.get("score_total")]
+    )
+    print(f"[run] complete — {len(rows)} rows, {total_errors} incomplete.")
+    return 1 if total_errors else 0
+
+
+# ---------------------------------------------------------------------------
+# subcommand: generate  (legacy)
+# ---------------------------------------------------------------------------
 
 def cmd_generate(args: argparse.Namespace) -> int:
     rows = load_csv(args.csv)
@@ -175,13 +551,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
         updated += 1
         print(f"  generated {fname}")
 
-    save_csv(args.csv, rows, CSV_COLS)
+    save_csv(args.csv, rows, LEGACY_CSV_COLS)
     print(f"generate: {updated} responses written, {errors} errors.")
     return 1 if errors else 0
 
 
 # ---------------------------------------------------------------------------
-# subcommand: judge
+# subcommand: judge  (legacy + shared helpers)
 # ---------------------------------------------------------------------------
 
 CRITERIA_COUNT = 17
@@ -216,8 +592,41 @@ def extract_expected(probe_text: str) -> str:
     return ""
 
 
+def build_judge_system_prompt(criteria_text: str) -> str:
+    """Static judge system prompt — cached across all 51 judge calls.
+
+    Contains only the rubric (same for every probe). The per-probe expected
+    shape and the response are in the user turn (build_judge_user_prompt).
+    """
+    return (
+        "You are a strict binary rubric scorer. Score each RESPONSE against "
+        "the 17 criteria rubric below and the expected shape provided in the "
+        "user turn. Output ONLY valid JSON.\n\n"
+        "=== CRITERIA RUBRIC ===\n\n"
+        f"{criteria_text}\n\n"
+        "=== OUTPUT FORMAT ===\n"
+        "Output a JSON object with exactly these keys:\n"
+        "  score_total: integer 0-17 (sum of criteria scored 1, excluding n/a)\n"
+        "  passed: boolean (true if adv-probe fully adheres; "
+        "for q-probes use score_total >= 10)\n"
+        "  criterion_scores: array of 17 values, each 0, 1, or 'n/a'\n"
+        "  rationale: one sentence (why passed/failed)\n"
+        "Output nothing else — no prose before or after the JSON."
+    )
+
+
+def build_judge_user_prompt(expected: str, response: str) -> str:
+    """Per-probe user turn for the judge (not cached — differs per probe)."""
+    return (
+        "=== EXPECTED SHAPE / ADHERENCE ===\n\n"
+        f"{expected}\n\n"
+        "=== RESPONSE TO SCORE ===\n\n"
+        f"{response}"
+    )
+
+
 def build_judge_prompt(criteria_text: str, expected: str, response: str) -> str:
-    """Build the judge prompt from local files only.
+    """Build the legacy single-turn judge prompt (used by cmd_judge).
 
     Never interpolates PR title / branch / commit message — prompt-injection
     vector documented in the design spec.
@@ -348,7 +757,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
             f"score={row['score_total']} passed={row['passed']}"
         )
 
-    save_csv(args.csv, rows, CSV_COLS)
+    save_csv(args.csv, rows, LEGACY_CSV_COLS)
     print(f"judge: {updated} rows scored, {errors} errors.")
     return 1 if errors else 0
 
@@ -375,7 +784,6 @@ def read_canary_output(path: str) -> str:
 
 def build_probe_table(rows: list[dict[str, str]], baseline: str, candidate: str) -> str:
     """Produce a Markdown table: one row per probe, baseline vs candidate."""
-    # Aggregate: median score per (probe_id, calibration)
     from collections import defaultdict
     import statistics as st
 
@@ -532,7 +940,30 @@ def main() -> int:
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    # --- generate ---
+    # --- run (unified parallel pipeline) ---
+    run_p = sub.add_parser("run", help="Full pipeline: materialise → generate → judge")
+    run_p.add_argument(
+        "--ref", required=True,
+        help="<git-ref>=<label> (e.g. abc123=baseline)",
+    )
+    run_p.add_argument("--probes", default="questions,adversarial")
+    run_p.add_argument("--k", type=int, default=3, help="Runs per probe (default: 3)")
+    run_p.add_argument("--out", required=True, help="Output CSV path")
+    run_p.add_argument(
+        "--gen-model", default="claude-haiku-4-5",
+        help="Generation model (default: claude-haiku-4-5)",
+    )
+    run_p.add_argument(
+        "--judge-model", default="claude-sonnet-4-6",
+        help="Judge model (default: claude-sonnet-4-6)",
+    )
+    run_p.add_argument(
+        "--prompts-dir", default="",
+        help="Directory for materialised prompt files (default: tmpdir)",
+    )
+    run_p.add_argument("--mock", action="store_true", help="Fake LLM calls")
+
+    # --- generate (legacy) ---
     gen = sub.add_parser("generate", help="Call claude -p per prompt file")
     gen.add_argument("--csv", required=True, help="Path to results.csv")
     gen.add_argument(
@@ -544,7 +975,7 @@ def main() -> int:
         help="Fake LLM calls (for local dry-run)",
     )
 
-    # --- judge ---
+    # --- judge (legacy) ---
     jdg = sub.add_parser("judge", help="Score responses against the rubric")
     jdg.add_argument("--csv", required=True)
     jdg.add_argument(
@@ -573,6 +1004,8 @@ def main() -> int:
 
     args = ap.parse_args()
 
+    if args.cmd == "run":
+        return cmd_run(args)
     if args.cmd == "generate":
         return cmd_generate(args)
     if args.cmd == "judge":
