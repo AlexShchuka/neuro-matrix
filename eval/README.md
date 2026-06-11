@@ -5,7 +5,7 @@ A repeatable measurement of the protocol's effect on agent behaviour. Without th
 ## What's in here
 
 - `criteria.md` — the 17-criteria binary rubric, with scoring rules.
-- `questions/` — currently empty (no question probes yet — add your own per `questions/README.md`).
+- `questions/` — holds 6 session-derived probes (q01–q06); add more per `questions/README.md`.
 - `adversarial/` — adversarial probes designed to trip invariants under deliberate bypass attempts.
 - `runner.md` — manual workflow for grading a calibration against the suite.
 - `run_suite.py` + `statistical_test.py` — Layer E harness (k-run aggregation, paired Wilcoxon, bootstrap CI on Cohen's d, McNemar one-sided, Krippendorff α).
@@ -30,4 +30,4 @@ Shapes live inside each question file under the `## Expected shape` section.
 
 - Same underlying model on both sides → some convergence is from the shared prior, not the protocol. External judge (different family) or multi-judge aggregation lifts this — see `ROADMAP.md`.
 - 17 binary criteria are coarse — they catch shape, not subtle quality. Treat scores as a regression alarm, not as a quality ceiling.
-- The suite is small (11, all adversarial). Use `statistical_test.py` (paired Wilcoxon + bootstrap CI on Cohen's d) to separate signal from noise.
+- The suite is small (17: 11 adversarial + 6 questions). Use `statistical_test.py` (paired Wilcoxon + bootstrap CI on Cohen's d) to separate signal from noise.
