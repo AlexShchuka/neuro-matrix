@@ -101,4 +101,4 @@ The eval harness — paired Wilcoxon + bootstrap CI on Cohen's d + McNemar one-s
 
 ## Copyright
 
-© 2026 Aleksandr Shchuka. Licensed under PolyForm Noncommercial 1.0.0 — **noncommercial use only** — see `LICENSE` and `COPYRIGHT-NOTICE.md`.
+© 2026 Aleksandr Shchuka. Licensed under the MIT License — see `LICENSE` and `COPYRIGHT-NOTICE.md`.
