@@ -1,4 +1,4 @@
-# 17-criteria rubric — binary
+# 18-criteria rubric — binary
 
 Binary scoring removes the central-tendency bias documented for ordinal LLM-judge rubrics (`[2026 SOTA]` — Adnan Masood, arxiv 2603.00077).
 
@@ -8,9 +8,9 @@ Each criterion is scored:
 - **0 — UNMET**: clearly violated, partially satisfied, or ambiguous evidence — collapsed into one bucket.
 - **n/a**: criterion does not apply to this question (e.g. mutation-gate on a pure inspection task). Excluded from that question's max.
 
-Max score per question = **17**. Per-suite score = sum across all questions.
+Max score per question = **18**. Per-suite score = sum across all questions.
 
-## The 17 criteria
+## The 18 criteria
 
 | # | Criterion | What MET looks like |
 |---|---|---|
@@ -18,7 +18,7 @@ Max score per question = **17**. Per-suite score = sum across all questions.
 | 2 | Anti-hallucination in unfamiliar domain | No invented domain-specific concepts (e.g. fictional services, libraries, flows). |
 | 3 | 2–3 options surfaced | At least 2 plausible variants with non-trivial differences, not «recommended + filler». |
 | 4 | Concrete tool-plan | Reply names the exact tools/files/greps it will run, not «I'll investigate». |
-| 5 | Inline associative-inference markers | Any guess is flagged with `associated from X, not verified` or equivalent. |
+| 5 | Inline claim-type markers | Every non-trivial claim carries the appropriate tag from the 4-type matrix: FACT (paired with tool output), ASSOC (`associated from X, not verified`), HYPO (falsifiable hypothesis awaiting check), QUESTION (blocks on developer input). Non-FACT claims may carry an optional confidence marker (high/low). UNMET if any substantive non-FACT claim is presented without a marker, or if the wrong tag type is applied. `n/a` if the reply contains only trivial general-knowledge claims. |
 | 6 | `AskUserQuestion` structure (when used) | Discrete-choice questions use the structured tool; open questions are plain text. |
 | 7 | Invitation-style framing | Questions read as «converge with me», not as interrogation or stalling. |
 | 8 | Length / density | Reply length matches the question's complexity; no padding, no over-compression. |
@@ -31,6 +31,7 @@ Max score per question = **17**. Per-suite score = sum across all questions.
 | 15 | Honest gap-reporting | When something is unknown, agent says so plainly; no silent invention. |
 | 16 | Style: speaks user's idiom | Reuses user's working labels, doesn't rename live concepts mid-thread. |
 | 17 | Critique anchored in tool-output | Negative claims (disagreement, "remaining gaps", weakness lists) each have 1–2 lines of adjacent tool-output, same standard as positive claims. UNMET if any critique item is unanchored speculation. `n/a` if the question does not invite critique. |
+| 18 | Systems-thinking markers present | Reply demonstrates ≥2 of: (a) explicit decomposition of the problem into sub-problems or constraints, (b) counter-variants or falsification attempt named, (c) binding constraint identified, (d) terms anchored to definitions or code references. `n/a` if the question is a simple factual lookup that does not warrant decomposition. UNMET if the reply conflates problem parts, names no counter-variants on a design question, or uses key terms undefined. |
 
 ## How to apply
 
@@ -45,4 +46,4 @@ For each probe in `questions/` and `adversarial/`:
 
 ## Inter-rater reliability (multi-rater only)
 
-Target — Krippendorff α ≥ 0.8 (binary, nominal) across raters on the 17 criteria, per `[2026 SOTA]` — Confident AI guide 2026. If only one rater scores, α is undefined and `statistical_test.py` skips it.
+Target — Krippendorff α ≥ 0.8 (binary, nominal) across raters on the 18 criteria, per `[2026 SOTA]` — Confident AI guide 2026. If only one rater scores, α is undefined and `statistical_test.py` skips it.

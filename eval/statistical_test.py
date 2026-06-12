@@ -10,7 +10,7 @@ Reads results.csv (produced by run_suite.py and then scored) with columns:
     [rater]            — optional, default "1"; enables Krippendorff α when
                          ≥2 raters score the same (probe_id, calibration) and
                          criterion_scores is present.
-    [criterion_scores] — optional, CSV-string of 17 binary digits per row;
+    [criterion_scores] — optional, CSV-string of 18 binary digits per row;
                          e.g. "1,0,1,1,0,1,...,1". Skipped if absent.
     [canary_guid]      — optional, anti-contamination marker checked by
                          scripts/check-canary-leak.py.
@@ -191,7 +191,7 @@ def mcnemar_one_sided(b: list[float], c: list[float]) -> tuple[int, int, float]:
 
 
 def parse_criterion_scores(s: str) -> list[Optional[int]]:
-    """Parse a CSV string of 17 per-criterion scores.
+    """Parse a CSV string of 18 per-criterion scores.
 
     Accepts `0`, `1`, or `n/a` (`na`) per criterion — `n/a` means the
     criterion did not apply to this probe and the position is skipped by

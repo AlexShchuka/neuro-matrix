@@ -97,7 +97,7 @@ Agents are bound to **roles** in the co-system. Names are current bindings; the 
 
 Stack specifics can be placed in `references/per-stack/<stack>.md`.
 
-The eval harness — paired Wilcoxon + bootstrap CI on Cohen's d + McNemar one-sided under a pre-registered decision rule — lives in `eval/run_suite.py` and `eval/statistical_test.py`. Binary rubric (17 criteria, MET/UNMET) removes central-tendency bias; `--k N` runs with median aggregation; Krippendorff α on 17 binary criteria raises inter-rater reliability; a canary GUID in every probe + `scripts/check-canary-leak.py` catch contamination. Methodology: 2026 SOTA for rubric-based LLM evaluation.
+The eval harness — paired Wilcoxon + bootstrap CI on Cohen's d + McNemar one-sided under a pre-registered decision rule — lives in `eval/run_suite.py` and `eval/statistical_test.py`. Binary rubric (18 criteria, MET/UNMET) removes central-tendency bias; `--k N` runs with median aggregation; Krippendorff α on 18 binary criteria raises inter-rater reliability; a canary GUID in every probe + `scripts/check-canary-leak.py` catch contamination. Methodology: 2026 SOTA for rubric-based LLM evaluation.
 
 ## Copyright
 
