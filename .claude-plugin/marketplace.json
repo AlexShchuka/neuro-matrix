@@ -9,7 +9,7 @@
       "name": "neuro-matrix",
       "source": ".",
       "description": "AI + developer co-system protocol for Claude Code — hypothesis-only claims, randomized invariant self-check, halt-on-no-progress, dual approval+verification gate, and critic / epistemic-auditor sub-agents. Keeps AI-assisted coding and code review anchored to reality.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "author": {
         "name": "Aleksandr Shchuka"
       },

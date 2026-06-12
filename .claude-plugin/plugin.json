@@ -1,7 +1,7 @@
 {
   "name": "neuro-matrix",
   "description": "Assistant prompt, agents, and hooks for an AI + developer co-system protocol grounded in common sense, scientific method, and Nash-equilibrium cooperation. Hypothesis-only claims, associative option-search, randomized invariant self-check, halt on no-progress, critic and epistemic-auditor verification.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "Aleksandr Shchuka"
   }
