@@ -31,8 +31,40 @@
 #
 # Marker mechanics: single-use, TTL 5 min, consumed on use — every subsequent push /
 # MR-create needs a fresh critic pass and a new verdict file.
+#
+# ── Human gate (п.2) ────────────────────────────────────────────────────────
+# After the critic gate passes, a second gate checks whether any changed path
+# is a protocol artifact (invariants.txt, agents/, hooks/, eval/, CLAUDE.md,
+# references/protocol/, scripts/).  Protocol paths are the enforcement layer;
+# changes to them must be approved by the human owner, not the agent.
+#
+# Human marker contract (both lines required, order-insensitive):
+#   approved-by: human
+#   diff-sha256: <sha256 of git diff origin/<default-branch>...HEAD>
+#
+# Trust-model limitation: the hook cannot technically verify that the writer
+# of ~/.claude-human-approved is a human — it only verifies the file exists,
+# is fresh (TTL 300 s), and contains a matching sha256.  Writing this marker
+# from inside the agent is a protocol violation; the same trust model applies
+# as `bypass: owner-accepted-risk` — it works mechanically but breaks the
+# co-system contract.  The gate is a friction point and an audit trail, not a
+# cryptographic proof.
+#
+# Human marker mechanics: single-use, TTL 300 s, consumed on check (same as
+# critic marker).  Non-protocol diffs skip this gate entirely.
+# Combined retry cost: the critic marker is consumed at check time (line ~100)
+# before the human gate is reached — a human-gate block on a protocol diff
+# still burns the critic marker, so each retry requires BOTH a fresh critic
+# pass AND a fresh human marker.
 
 set -euo pipefail
+
+# Source protocol-path helper (defines protocol_path_matches()).
+# Path is resolved relative to this script's own location so it works
+# regardless of CWD or how ${CLAUDE_PLUGIN_ROOT} is set at hook runtime.
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=protocol-paths.sh
+. "${_SCRIPT_DIR}/protocol-paths.sh"
 
 INPUT="$(cat)"
 
@@ -52,6 +84,7 @@ fi
 [[ "$matches" -eq 1 ]] || exit 0
 
 MARKER="${HOME}/.claude-critic-approved"
+CRITIC_PASSED=0
 
 # Portable sha256: prefer sha256sum (Linux/GNU), fall back to shasum -a 256 (macOS).
 sha256_of() {
@@ -153,14 +186,14 @@ EOF
     exit 2
   fi
 
-  # All checks passed.
-  exit 0
+  # All checks passed — fall through to human gate below.
+  CRITIC_PASSED=1
 fi
 
-# No marker file — emit the full instruction block.
-LIVE_SHA_HINT="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null | sha256_of || echo "<run: git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}'>")"
-
-cat >&2 <<EOF
+# If critic marker was missing (CRITIC_PASSED not set) — emit the full instruction block.
+if [[ "${CRITIC_PASSED:-0}" -ne 1 ]]; then
+  LIVE_SHA_HINT="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null | sha256_of || echo "<run: git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}'>")"
+  cat >&2 <<EOF
 auto-critic: a mandatory critic check is required before this mutation.
 
 1. Invoke the critic sub-agent with:
@@ -186,5 +219,114 @@ auto-critic: a mandatory critic check is required before this mutation.
 Owner bypass (risk accepted, audit trail required):
    printf 'bypass: owner-accepted-risk\n' > ~/.claude-critic-approved
    (A prominent warning will be emitted; the bypass is single-use and TTL-bound.)
+EOF
+  exit 2
+fi
+
+# ── Human gate ──────────────────────────────────────────────────────────────
+# Detect whether any changed path is a protocol artifact (via sourced helper).
+PROTOCOL_CHANGED=0
+MATCHED_PATHS=""
+while IFS= read -r changed_path; do
+  if protocol_path_matches "$changed_path"; then
+    PROTOCOL_CHANGED=1
+    MATCHED_PATHS="${MATCHED_PATHS}  ${changed_path}"$'\n'
+  fi
+done < <(git diff --name-only "${DEFAULT_REF}...HEAD" 2>/dev/null || true)
+
+if [[ "$PROTOCOL_CHANGED" -eq 0 ]]; then
+  # Non-protocol diff — no human gate required.
+  exit 0
+fi
+
+# Protocol paths changed — check human marker.
+HUMAN_MARKER="${HOME}/.claude-human-approved"
+
+if [[ -f "$HUMAN_MARKER" ]]; then
+  NOW_H=$(date +%s)
+  MTIME_H=$(stat -c %Y "$HUMAN_MARKER" 2>/dev/null || stat -f %m "$HUMAN_MARKER" 2>/dev/null || echo "$NOW_H")
+  AGE_H=$(( NOW_H - MTIME_H ))
+
+  # Always consume (single-use), whether we pass or block.
+  HUMAN_CONTENT="$(cat "$HUMAN_MARKER")"
+  rm -f "$HUMAN_MARKER"
+
+  if [[ "$AGE_H" -gt 300 ]]; then
+    cat >&2 <<EOF
+auto-critic: human-gate marker expired (age ${AGE_H}s > 300s TTL).
+The marker must be written by the human owner. Re-run the approval command:
+  DIFF_SHA=\$(git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}')
+  printf 'approved-by: human\ndiff-sha256: %s\n' "\$DIFF_SHA" > ~/.claude-human-approved
+EOF
+    exit 2
+  fi
+
+  # Parse required fields.
+  APPROVED_LINE="$(printf '%s' "$HUMAN_CONTENT" | grep '^approved-by: ' | head -1 || true)"
+  H_SHA_LINE="$(printf '%s' "$HUMAN_CONTENT" | grep '^diff-sha256: ' | head -1 || true)"
+
+  if [[ -z "$APPROVED_LINE" ]] || [[ -z "$H_SHA_LINE" ]]; then
+    cat >&2 <<'EOF'
+auto-critic: human-gate marker is missing required fields. Both lines are required:
+    approved-by: human
+    diff-sha256: <sha256 of git diff origin/<default-branch>...HEAD>
+STOP — this file must be written by the human, not the agent.
+EOF
+    exit 2
+  fi
+
+  APPROVED_VAL="$(printf '%s' "$APPROVED_LINE" | sed 's/^approved-by: //')"
+  H_STORED_SHA="$(printf '%s' "$H_SHA_LINE" | sed 's/^diff-sha256: //')"
+
+  if [[ "$APPROVED_VAL" != "human" ]]; then
+    cat >&2 <<EOF
+auto-critic: human-gate marker has 'approved-by: ${APPROVED_VAL}', expected 'human'.
+STOP — this file must be written by the human, not the agent.
+EOF
+    exit 2
+  fi
+
+  # Recompute diff sha256 and compare.
+  H_LIVE_SHA="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null | sha256_of)"
+
+  if [[ "$H_LIVE_SHA" != "$H_STORED_SHA" ]]; then
+    cat >&2 <<EOF
+auto-critic: human-gate diff-sha256 mismatch — the diff changed since the human approved it.
+
+  Stored : ${H_STORED_SHA}
+  Current: ${H_LIVE_SHA}
+
+STOP — ask the human owner to re-approve:
+  DIFF_SHA=\$(git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}')
+  printf 'approved-by: human\ndiff-sha256: %s\n' "\$DIFF_SHA" > ~/.claude-human-approved
+EOF
+    exit 2
+  fi
+
+  # Human gate passed.
+  exit 0
+fi
+
+# No human marker file — emit instruction block (STOP message to agent).
+H_SHA_HINT="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null | sha256_of || echo "<run: git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}'>")"
+
+cat >&2 <<EOF
+auto-critic: STOP — protocol-artifact paths are changed and require human approval before push.
+
+Matched protocol paths:
+${MATCHED_PATHS}
+This marker MUST be written by the human owner, not the agent.
+Writing ~/.claude-human-approved from inside the agent is a protocol violation (same trust model
+as 'bypass: owner-accepted-risk' — it works mechanically but breaks the co-system contract).
+
+Note: the critic marker was already consumed by the critic gate above — each retry after a
+human-gate block requires BOTH a fresh critic pass AND a fresh human marker.
+
+Ask the owner to run in the Claude Code prompt:
+  ! DIFF_SHA=\$(git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}'); printf 'approved-by: human\ndiff-sha256: %s\n' "\$DIFF_SHA" > ~/.claude-human-approved
+
+  Current diff sha256 (for reference): ${H_SHA_HINT}
+
+Then re-run the original push command (after completing a fresh critic pass first).
 EOF
 exit 2
