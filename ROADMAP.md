@@ -25,6 +25,7 @@ Each item is anchored to a concrete repo location, confirmed by tool output.
 | N7 | Verification gate covers only `sh`/`py`/`json` | `scripts/verification-gate.sh` (case block) | On compiled/typed stacks (C#, TS/TSX, Swift) the verification half of the dual gate no-ops, silently degrading to approval-only on the languages most projects ship — the regime EviBound measures at ≈25–100% false-completion. Add stack-aware checks (`tsc --noEmit`, `dotnet build`/`format --verify-no-changes`, `swift build`). | shipped |
 | N8 | Role subsets omit #23/#24/#25 | `scripts/role-invariants.sh` (subsets) | The verification-gate (#23) and the new red-line (#24) / halt-on-contradiction (#25) invariants are inherited by no role. Curate the subsets — calibration change, gate behind the eval suite. | open |
 
+(N2 — positive eval probes — shipped as S5 below.)
 (N3 — role-invariants off-by-one — shipped as S3 below.)
 (N4 — marketplace manifest — shipped as S2 below.)
 
@@ -36,6 +37,7 @@ Each item is anchored to a concrete repo location, confirmed by tool output.
 | S2 | Discoverability enablers — installable + directory-listable marketplace manifest, README/landing SEO+GEO, `llms.txt`, MIT License | `.claude-plugin/marketplace.json`, `docs/index.html`, `llms.txt`, `LICENSE` | this PR |
 | S3 | Invariant-set integrity & coverage — stable `#N` ids addressed by `grep` (not file line), fixed role-inheritance off-by-one (N3) + stale cross-refs, deontic/Counter consistency (#15/#19/#23), and two new invariants (#24 hard-prohibitions, #25 halt-on-contradiction) | `invariants.txt`, `scripts/role-invariants.sh`, `scripts/random-invariant.sh`, `CLAUDE.md`, `agents/epistemic-auditor.md` | this PR (`alexshchuka/invariant-integrity-and-gaps`) |
 | S4 | Repo hygiene cleanup — `.gitignore` added; `eval/README.md` inaccuracies fixed (questions bullet, probe count, broken ref); `docs/DISCOVERABILITY.md` stale merge-order removed + canonical pointer to `ROADMAP.md`; orphan scripts (`notion-page-dump.py`, `tracker-context.py`) removed; `verification-gate.sh` ported to bash-3.2 (`mapfile`/`declare -A` replaced); `agents/analyzer.md` scoped to least-privilege `tools: Read, Grep, Glob` (N8 partial) | `.gitignore`, `eval/README.md`, `docs/DISCOVERABILITY.md`, `scripts/verification-gate.sh`, `agents/analyzer.md`, `ROADMAP.md` | PR `alexshchuka/repo-review-cleanup` |
+| S5 | Positive eval probes (N2) — q01–q06 authored from real sessions; `run_suite.py` glob no longer empty | `eval/questions/q01.md`–`q06.md` | PR #34 |
 
 ## Discoverability — maintainer actions (not automatable in a PR)
 
