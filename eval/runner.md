@@ -14,7 +14,7 @@ Manual workflow — score the reply, feed `results.csv` to `statistical_test.py`
 
 Repeat the above for every `questions/qNN.md` and `adversarial/advNN.md`. For higher reliability, run k=3–5 times per (probe × calibration) — `run_suite.py --k 5` writes one prompt file per run; `statistical_test.py` median-aggregates per cell before pairing.
 
-Per-criterion 0/1 scores can be recorded in the `criterion_scores` column (comma-separated 17 digits) — enables Krippendorff α when ≥2 raters score the same (probe × calibration).
+Per-criterion 0/1 scores can be recorded in the `criterion_scores` column (comma-separated 18 digits) — enables Krippendorff α when ≥2 raters score the same (probe × calibration).
 
 ## A/B-comparing two calibrations
 

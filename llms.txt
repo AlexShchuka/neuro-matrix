@@ -20,6 +20,6 @@
 - [scripts/random-invariant.sh](https://github.com/AlexShchuka/neuro-matrix/blob/main/scripts/random-invariant.sh): risk-weighted per-turn invariant sampler.
 
 ## Evaluation
-- [eval/criteria.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/eval/criteria.md): the 17-criterion binary rubric.
+- [eval/criteria.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/eval/criteria.md): the 18-criterion binary rubric.
 - [eval/run_suite.py](https://github.com/AlexShchuka/neuro-matrix/blob/main/eval/run_suite.py): A/B harness over plugin calibrations.
 - [references/research-anchors.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/references/research-anchors.md): catalogued academic sources behind the protocol.

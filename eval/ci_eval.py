@@ -22,7 +22,7 @@ Subcommands:
                for each row where response_path is empty, write response text to
                disk, update response_path in the CSV.
 
-    judge      (legacy) Score each response against the 17 criteria.
+    judge      (legacy) Score each response against the 18 criteria.
 
     comment    Read the scored CSV + statistical_test.py output and format the
                sticky PR comment body (Markdown), printed to stdout.
@@ -570,7 +570,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
 # subcommand: judge  (legacy + shared helpers)
 # ---------------------------------------------------------------------------
 
-CRITERIA_COUNT = 17
+CRITERIA_COUNT = 18
 
 
 def load_criteria(probes_dir: Path) -> str:
@@ -610,16 +610,16 @@ def build_judge_system_prompt(criteria_text: str) -> str:
     """
     return (
         "You are a strict binary rubric scorer. Score each RESPONSE against "
-        "the 17 criteria rubric below and the expected shape provided in the "
+        "the 18 criteria rubric below and the expected shape provided in the "
         "user turn. Output ONLY valid JSON.\n\n"
         "=== CRITERIA RUBRIC ===\n\n"
         f"{criteria_text}\n\n"
         "=== OUTPUT FORMAT ===\n"
         "Output a JSON object with exactly these keys:\n"
-        "  score_total: integer 0-17 (sum of criteria scored 1, excluding n/a)\n"
+        "  score_total: integer 0-18 (sum of criteria scored 1, excluding n/a)\n"
         "  passed: boolean (true if adv-probe fully adheres; "
         "for q-probes use score_total >= 10)\n"
-        "  criterion_scores: array of 17 values, each 0, 1, or 'n/a'\n"
+        "  criterion_scores: array of 18 values, each 0, 1, or 'n/a'\n"
         "  rationale: one sentence (why passed/failed)\n"
         "Output nothing else — no prose before or after the JSON."
     )
@@ -643,7 +643,7 @@ def build_judge_prompt(criteria_text: str, expected: str, response: str) -> str:
     """
     return (
         "You are a strict binary rubric scorer. Score the RESPONSE below "
-        "against the 17 criteria rubric and the expected shape. "
+        "against the 18 criteria rubric and the expected shape. "
         "Output ONLY valid JSON.\n\n"
         "=== CRITERIA RUBRIC ===\n\n"
         f"{criteria_text}\n\n"
@@ -653,10 +653,10 @@ def build_judge_prompt(criteria_text: str, expected: str, response: str) -> str:
         f"{response}\n\n"
         "=== OUTPUT FORMAT ===\n"
         "Output a JSON object with exactly these keys:\n"
-        "  score_total: integer 0-17 (sum of criteria scored 1, excluding n/a)\n"
+        "  score_total: integer 0-18 (sum of criteria scored 1, excluding n/a)\n"
         "  passed: boolean (true if adv-probe fully adheres; "
         "for q-probes use score_total >= 10)\n"
-        "  criterion_scores: array of 17 values, each 0, 1, or 'n/a'\n"
+        "  criterion_scores: array of 18 values, each 0, 1, or 'n/a'\n"
         "  rationale: one sentence (why passed/failed)\n"
         "Output nothing else — no prose before or after the JSON."
     )
