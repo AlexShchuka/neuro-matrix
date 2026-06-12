@@ -36,6 +36,8 @@ Usage:
     python3 statistical_test.py results.csv --baseline <prev-label> --candidate <new-label>
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import math
@@ -186,7 +188,7 @@ def mcnemar_one_sided(b: list[float], c: list[float]) -> tuple[int, int, float]:
     n = regressions + improvements
     if n == 0:
         return (0, 0, 1.0)
-    p = sum(math.comb(n, k) for k in range(regressions + 1)) / (2 ** n)
+    p = sum(math.comb(n, k) for k in range(regressions, n + 1)) / (2 ** n)
     return (regressions, improvements, p)
 
 
