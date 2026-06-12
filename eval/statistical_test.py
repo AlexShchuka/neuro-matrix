@@ -126,10 +126,11 @@ def cohens_d_paired(b: list[float], c: list[float]) -> float:
     diffs = [ci - bi for bi, ci in zip(b, c)]
     if len(diffs) < 2:
         return 0.0
+    mean = statistics.mean(diffs)
     sd = statistics.stdev(diffs)
     if sd == 0:
-        return 0.0
-    return statistics.mean(diffs) / sd
+        return math.inf if mean > 0 else -math.inf if mean < 0 else 0.0
+    return mean / sd
 
 
 def bootstrap_ci(
@@ -150,7 +151,11 @@ def bootstrap_ci(
             sd = statistics.stdev(sample)
         except statistics.StatisticsError:
             sd = 0.0
-        samples.append(statistics.mean(sample) / sd if sd else 0.0)
+        m = statistics.mean(sample)
+        if sd:
+            samples.append(m / sd)
+        else:
+            samples.append(math.inf if m > 0 else -math.inf if m < 0 else 0.0)
     samples.sort()
     lo_i = int((1 - ci_level) / 2 * n_samples)
     hi_i = int((1 + ci_level) / 2 * n_samples) - 1

@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import os
 
 ALPHA = 0.05
+D_THRESHOLD = 0.2
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location(
@@ -56,6 +58,40 @@ def test_no_discordant_pairs():
 def test_monotone_in_regressions():
     ps = [st.mcnemar_one_sided(*_clear(r, 5 - r))[2] for r in range(6)]
     assert all(ps[i] >= ps[i + 1] for i in range(len(ps) - 1))
+
+
+def test_cohens_d_consistent_improvement_is_positive_infinite():
+    assert st.cohens_d_paired([0.0] * 6, [2.0] * 6) == math.inf
+
+
+def test_cohens_d_consistent_regression_is_negative_infinite():
+    assert st.cohens_d_paired([2.0] * 6, [0.0] * 6) == -math.inf
+
+
+def test_cohens_d_no_change_is_zero():
+    assert st.cohens_d_paired([1.0] * 6, [1.0] * 6) == 0.0
+
+
+def test_cohens_d_normal_case():
+    assert abs(st.cohens_d_paired([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]) - 2.0) < 1e-12
+
+
+def test_bootstrap_consistent_improvement_passes_gate():
+    lo, hi = st.bootstrap_ci([0.0] * 6, [2.0] * 6)
+    assert (lo, hi) == (math.inf, math.inf)
+    assert lo > D_THRESHOLD
+
+
+def test_bootstrap_consistent_regression_fails_gate():
+    lo, _ = st.bootstrap_ci([2.0] * 6, [0.0] * 6)
+    assert lo == -math.inf
+    assert lo <= D_THRESHOLD
+
+
+def test_bootstrap_normal_case_is_finite():
+    lo, hi = st.bootstrap_ci([0.0] * 8, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+    assert math.isfinite(lo) and math.isfinite(hi)
+    assert lo <= hi
 
 
 def _main():
