@@ -64,9 +64,6 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 
-# extract_section is duplicated from run_suite.py intentionally — ci_eval.py
-# must not import from run_suite.py (changing its import surface would modify
-# the existing harness, which is out of scope).
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 
 
@@ -110,11 +107,7 @@ LEGACY_CSV_COLS = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# LLM call — caching-aware split call
-# ---------------------------------------------------------------------------
 
-# Errors whose text indicates the request is retryable.
 _RETRYABLE_PATTERNS = re.compile(
     r"overload|rate.limit|429|503|unavailable|try.again",
     re.IGNORECASE,
@@ -242,9 +235,6 @@ def mock_generation(probe_id: str, calibration: str, run_idx: str) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# subcommand: run  (unified parallel pipeline)
-# ---------------------------------------------------------------------------
 
 def _run_suite_materialize(
     ref: str,
@@ -289,12 +279,10 @@ def _generate_one(
         if mock:
             text = mock_generation(probe_id, calibration, run_idx)
         elif calib_path and Path(calib_path).exists() and Path(prompt_path).exists():
-            # Caching path: system = calibration, user = probe prompt
             system_text = Path(calib_path).read_text(encoding="utf-8")
             user_text = Path(prompt_path).read_text(encoding="utf-8")
             text = call_claude_split(system_text, user_text, model)
         elif prompt_path and Path(prompt_path).exists():
-            # Fallback: legacy concatenated prompt
             text = call_claude(Path(prompt_path).read_text(encoding="utf-8"), model)
         else:
             elapsed = time.monotonic() - t0
@@ -342,7 +330,6 @@ def _judge_one(
             probe_text = probe_file.read_text(encoding="utf-8")
             expected = extract_expected(probe_text)
             response = Path(resp_path_str).read_text(encoding="utf-8")
-            # Judge call: system = criteria rubric (cached), user = expected + response
             user_prompt = build_judge_user_prompt(expected, response)
             raw = call_claude_split(criteria_system, user_prompt, model)
             result = parse_judge_output(raw)
@@ -388,7 +375,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     prompts_dir = args.prompts_dir or tempfile.mkdtemp(prefix="eval-prompts-")
     out_csv = args.out
 
-    # --- Materialise ---
     print(f"[run] materialising prompts for {label} ...")
     rc = _run_suite_materialize(
         ref=ref,
@@ -412,7 +398,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         responses_dir = Path(out_csv).parent / "responses"
         responses_dir.mkdir(parents=True, exist_ok=True)
 
-        # --- Warm-up: prime cache per calibration ---
         if not args.mock:
             calib_paths: dict[str, str] = {}
             for r in pending_gen:
@@ -424,13 +409,11 @@ def cmd_run(args: argparse.Namespace) -> int:
                 system_text = Path(cp).read_text(encoding="utf-8")
                 _warmup_call(system_text, args.gen_model, cal)
 
-        # --- Parallel generate ---
         max_workers = int(os.environ.get("EVAL_MAX_WORKERS", str(total_gen)))
         print(f"[run] generating {total_gen} responses (workers={max_workers}) ...")
         gen_errors: list[str] = []
         updated_rows: dict[int, dict[str, str]] = {}
 
-        # Build index map: row identity → position in rows list
         row_index: dict[int, int] = {}
         pending_idx = 0
         for i, r in enumerate(rows):
@@ -461,7 +444,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         save_csv(out_csv, rows, CSV_COLS)
         print(f"[run] generate done: {len(updated_rows)} ok, {len(gen_errors)} errors.")
 
-    # --- Judge phase ---
     rows = load_csv(out_csv)
     pending_judge = [r for r in rows if not r.get("score_total", "").strip()]
     total_judge = len(pending_judge)
@@ -472,10 +454,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         probes_dir = SCRIPT_DIR
         criteria_text = load_criteria(probes_dir)
 
-        # Build judge system prompt: static rubric only (cached across all calls).
         judge_system = build_judge_system_prompt(criteria_text)
 
-        # Warm-up for judge model (same criteria prefix, different model).
         if not args.mock:
             _warmup_call(judge_system, args.judge_model, f"judge-rubric ({label})")
 
@@ -484,7 +464,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         judge_errors: list[str] = []
         updated_judge: dict[int, dict[str, str]] = {}
 
-        # Build pending-to-rows mapping
         judge_index: dict[int, int] = {}
         pending_j_idx = 0
         for i, r in enumerate(rows):
@@ -517,11 +496,6 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     incomplete = [r for r in rows if not r.get("response_path") or not r.get("score_total")]
     if incomplete:
-        # Cell-level failures: generation or judge errors for individual probes.
-        # Return 0 so set -euo pipefail does not abort the workflow before
-        # merge/stats/canary/comment/enforce; the tiered verdict is the gate.
-        # The incomplete count is printed here and surfaced in the sticky
-        # comment via cmd_comment reading the CSV directly.
         print(
             f"[run] complete — {len(rows)} rows, {len(incomplete)} incomplete "
             f"(cell-level errors; tiered verdict will reflect degradation).",
@@ -532,9 +506,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# subcommand: generate  (legacy)
-# ---------------------------------------------------------------------------
 
 def cmd_generate(args: argparse.Namespace) -> int:
     rows = load_csv(args.csv)
@@ -546,7 +517,6 @@ def cmd_generate(args: argparse.Namespace) -> int:
     errors = 0
     for row in rows:
         if row.get("response_path", "").strip():
-            # already generated
             continue
         prompt_path = row.get("prompt_path", "").strip()
         if not prompt_path or not Path(prompt_path).exists():
@@ -589,9 +559,6 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
-# ---------------------------------------------------------------------------
-# subcommand: judge  (legacy + shared helpers)
-# ---------------------------------------------------------------------------
 
 CRITERIA_COUNT = 18
 
@@ -685,7 +652,7 @@ def build_judge_prompt(criteria_text: str, expected: str, response: str) -> str:
     )
 
 
-PASS_THRESHOLD_Q = 10  # score_total >= this -> passed for q-probes
+PASS_THRESHOLD_Q = 10
 
 
 def mock_judge(probe_id: str) -> dict:
@@ -697,13 +664,12 @@ def mock_judge(probe_id: str) -> dict:
     score_total alternates above/below the q-probe threshold by probe number
     to exercise both table cells without affecting the adv-pass path.
     """
-    # Alternate score by probe number to exercise both score table cells.
     last_digit = int(re.search(r"\d+$", probe_id).group(0)) % 2
     score = PASS_THRESHOLD_Q + 1 if last_digit == 0 else PASS_THRESHOLD_Q - 2
     score = min(max(score, 0), CRITERIA_COUNT)
     return {
         "score_total": score,
-        "passed": True,  # always pass — mock must not trigger adv-regression gate
+        "passed": True,
         "criterion_scores": [1] * CRITERIA_COUNT,
         "rationale": "[MOCK] wiring test — verdict logic not exercised",
     }
@@ -717,7 +683,6 @@ def parse_judge_output(text: str) -> dict:
     start = text.find("{")
     if start == -1:
         raise ValueError("No JSON object found in judge output")
-    # find matching closing brace
     depth = 0
     end = start
     for i, ch in enumerate(text[start:], start):
@@ -740,7 +705,6 @@ def cmd_judge(args: argparse.Namespace) -> int:
     errors = 0
     for row in rows:
         if row.get("score_total", "").strip():
-            # already scored
             continue
         resp_path_str = row.get("response_path", "").strip()
         if not resp_path_str or not Path(resp_path_str).exists():
@@ -799,9 +763,6 @@ def cmd_judge(args: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
-# ---------------------------------------------------------------------------
-# subcommand: comment
-# ---------------------------------------------------------------------------
 
 def read_stats_output(path: str) -> str:
     """Read the captured stdout of statistical_test.py."""
@@ -828,7 +789,6 @@ def build_probe_table(rows: list[dict[str, str]], baseline: str, candidate: str)
     for r in rows:
         grouped[(r["probe_id"], r["calibration"])].append(r)
 
-    # collect probe IDs in stable order
     probe_ids = sorted({pid for (pid, _) in grouped})
 
     lines = [
@@ -875,25 +835,16 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
     job_fails = False
     verdict = "APPROVE"
 
-    # A2 fail-closed: canary checker must print "Checked N response(s)" on its
-    # normal success path. Non-empty output lacking this marker means the
-    # checker crashed before completing — treat as contamination unknown.
     if canary_text and "Checked" not in canary_text:
         job_fails = True
         verdict = "FAIL — STRUCTURAL: canary checker produced no normal output (possible crash)"
         return verdict, job_fails
 
-    # canary leak check — check-canary-leak.py prints "CONTAMINATION" when a
-    # leak is found. Avoid false-matching "No canary leaks detected." by
-    # requiring the positive contamination marker, not just the word "leak".
     if "CONTAMINATION" in canary_text:
         job_fails = True
         verdict = "FAIL — canary contamination detected"
         return verdict, job_fails
 
-    # A1 fail-closed: stats output must contain the VERDICT line AND the
-    # McNemar adv line.  If either is absent the script likely crashed and
-    # returned a traceback — missing evidence must never read as APPROVE.
     if stats_text and ("VERDICT:" not in stats_text or "McNemar adv:" not in stats_text):
         job_fails = True
         verdict = (
@@ -902,12 +853,6 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
         )
         return verdict, job_fails
 
-    # McNemar adversarial regression — gate on the p-value, not the raw count.
-    # statistical_test.py prints: "McNemar adv: N regressions, M improvements, p(one-sided)=X.XXXX"
-    # A non-zero count with p=1.0000 (null comparison, judge noise at k=3) must not
-    # fail the job — only a statistically significant signal (p < 0.05) warrants FAIL.
-    # Fail-closed: if the McNemar line is present but the p-value is unparseable,
-    # treat as a structural failure (do not silently pass).
     if "McNemar adv:" in stats_text:
         mcnemar_p_match = re.search(r"McNemar adv:.*?p\(one-sided\)=([0-9.]+)", stats_text)
         if mcnemar_p_match:
@@ -917,7 +862,6 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
                 verdict = f"FAIL — significant adversarial regression (McNemar p={mp:.4f} < 0.05)"
                 return verdict, job_fails
         else:
-            # McNemar line present but p-value not parseable — structural failure.
             job_fails = True
             verdict = (
                 "FAIL — STRUCTURAL: McNemar line present but p-value unparseable "
@@ -925,7 +869,6 @@ def determine_verdict(stats_text: str, canary_text: str) -> tuple[str, bool]:
             )
             return verdict, job_fails
 
-    # Wilcoxon / Cohen's d shortfall — warning only, job stays green
     wilcoxon_match = re.search(r"Wilcoxon p \(q-totals\):\s+(\S+)", stats_text)
     cohens_match = re.search(r"\[95% bootstrap CI: ([\d.]+), ([\d.]+)\]", stats_text)
     warnings: list[str] = []
@@ -957,13 +900,9 @@ def cmd_comment(args: argparse.Namespace) -> int:
     stats_text = read_stats_output(args.stats_output)
     canary_text = read_canary_output(args.canary_output) if args.canary_output else ""
 
-    # --baseline / --candidate are the CSV calibration labels (e.g. "baseline",
-    # "candidate") used for table lookup. --baseline-sha / --candidate-sha are
-    # the git SHAs for the comment heading (default to the labels if not given).
     baseline_sha = getattr(args, "baseline_sha", None) or args.baseline
     candidate_sha = getattr(args, "candidate_sha", None) or args.candidate
 
-    # Surface any incomplete cells (generate/judge cell-level failures).
     incomplete = [r for r in rows if not r.get("response_path") or not r.get("score_total")]
     incomplete_note = (
         f"\n> **{len(incomplete)} cell(s) incomplete** "
@@ -974,7 +913,6 @@ def cmd_comment(args: argparse.Namespace) -> int:
     table = build_probe_table(rows, args.baseline, args.candidate)
     verdict, job_fails = determine_verdict(stats_text, canary_text)
 
-    # verdict tag: text token for GitHub UI heading
     verdict_icon = "FAIL" if job_fails else ("WARN" if "WARNING" in verdict else "PASS")
 
     body = textwrap.dedent(f"""\
@@ -1019,9 +957,6 @@ def cmd_comment(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# entry point
-# ---------------------------------------------------------------------------
 
 def main() -> int:
     ap = argparse.ArgumentParser(
@@ -1030,7 +965,6 @@ def main() -> int:
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    # --- run (unified parallel pipeline) ---
     run_p = sub.add_parser("run", help="Full pipeline: materialise → generate → judge")
     run_p.add_argument(
         "--ref", required=True,
@@ -1053,7 +987,6 @@ def main() -> int:
     )
     run_p.add_argument("--mock", action="store_true", help="Fake LLM calls")
 
-    # --- generate (legacy) ---
     gen = sub.add_parser("generate", help="Call claude -p per prompt file")
     gen.add_argument("--csv", required=True, help="Path to results.csv")
     gen.add_argument(
@@ -1065,7 +998,6 @@ def main() -> int:
         help="Fake LLM calls (for local dry-run)",
     )
 
-    # --- judge (legacy) ---
     jdg = sub.add_parser("judge", help="Score responses against the rubric")
     jdg.add_argument("--csv", required=True)
     jdg.add_argument(
@@ -1086,7 +1018,6 @@ def main() -> int:
     )
     jdg.add_argument("--mock", action="store_true")
 
-    # --- comment ---
     cmt = sub.add_parser("comment", help="Format sticky PR comment body")
     cmt.add_argument("--csv", required=True)
     cmt.add_argument(
