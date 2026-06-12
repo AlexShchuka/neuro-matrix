@@ -44,6 +44,8 @@ Parallelism design (V-c):
     Retryable errors (overload / 429-shaped) get one retry with 5 s backoff.
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import json
@@ -54,6 +56,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -97,15 +100,13 @@ def save_csv(path: str, rows: list[dict[str, str]], fieldnames: list[str]) -> No
 CSV_COLS = [
     "probe_id", "calibration", "probe_kind", "run_idx",
     "prompt_path", "calib_path", "response_path",
-    "score_total", "passed", "canary_guid", "criterion_scores",
+    "score_total", "passed", "canary_guid", "criterion_scores", "rater",
 ]
 
-# Columns present in legacy CSVs (no calib_path / criterion_scores).
-# save_csv uses extrasaction="ignore" so missing keys are fine.
 LEGACY_CSV_COLS = [
     "probe_id", "calibration", "probe_kind", "run_idx",
     "prompt_path", "response_path", "score_total", "passed",
-    "canary_guid", "criterion_scores",
+    "canary_guid", "criterion_scores", "rater",
 ]
 
 
@@ -207,6 +208,28 @@ def call_claude(prompt: str, model: str) -> str:
         return data.get("result") or result.stdout
     except json.JSONDecodeError:
         return result.stdout
+
+
+def call_github_models(prompt: str, model: str) -> str:
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN not set (needs models: read scope)")
+    body = json.dumps(
+        {"model": model, "messages": [{"role": "user", "content": prompt}]}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        "https://models.github.ai/inference/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=CALL_TIMEOUT_SEC) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return data["choices"][0]["message"]["content"]
 
 
 def mock_generation(probe_id: str, calibration: str, run_idx: str) -> str:
@@ -747,7 +770,10 @@ def cmd_judge(args: argparse.Namespace) -> int:
                 result = mock_judge(row["probe_id"])
             else:
                 judge_prompt = build_judge_prompt(criteria_text, expected, response)
-                raw = call_claude(judge_prompt, args.model)
+                if args.judge_provider == "github-models":
+                    raw = call_github_models(judge_prompt, args.model)
+                else:
+                    raw = call_claude(judge_prompt, args.model)
                 result = parse_judge_output(raw)
         except Exception as exc:
             print(
@@ -761,6 +787,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
         row["passed"] = "1" if result.get("passed") else "0"
         cs = result.get("criterion_scores", [])
         row["criterion_scores"] = ",".join(str(v) for v in cs)
+        row["rater"] = args.rater
         updated += 1
         print(
             f"  judged {row['probe_id']}/{row['calibration']}: "
@@ -1048,6 +1075,14 @@ def main() -> int:
     jdg.add_argument(
         "--model", default="claude-sonnet-4-6",
         help="Judge model (default: claude-sonnet-4-6)",
+    )
+    jdg.add_argument(
+        "--judge-provider", default="claude", choices=["claude", "github-models"],
+        help="claude (CLI) or github-models (cross-family second judge)",
+    )
+    jdg.add_argument(
+        "--rater", default="1",
+        help="Rater id tagged on judged rows (use 2 for a second judge)",
     )
     jdg.add_argument("--mock", action="store_true")
 

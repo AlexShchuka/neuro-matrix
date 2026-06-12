@@ -1,0 +1,36 @@
+name: second-judge
+
+on:
+  workflow_dispatch:
+    inputs:
+      csv:
+        description: results.csv with response_path rows to score as rater 2
+        required: true
+      model:
+        description: GitHub Models id (publisher/model), non-Claude family
+        required: false
+        default: openai/gpt-4.1
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  second-judge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cross-family second judge via GitHub Models
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSV: ${{ inputs.csv }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          python3 eval/ci_eval.py judge \
+            --csv "$CSV" \
+            --judge-provider github-models \
+            --model "$MODEL" \
+            --rater 2
