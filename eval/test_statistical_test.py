@@ -94,6 +94,61 @@ def test_bootstrap_normal_case_is_finite():
     assert lo <= hi
 
 
+def _arow(calib, pid, scores, rater="1"):
+    return {
+        "calibration": calib,
+        "probe_id": pid,
+        "rater": rater,
+        "criterion_scores": ",".join(scores),
+    }
+
+
+def test_alpha_no_criterion_scores_returns_empty():
+    assert st.alpha_per_calibration([{"calibration": "base", "probe_id": "p1"}]) == {}
+
+
+def test_alpha_single_rater_is_skipped():
+    rows = [
+        _arow("base", "p1", ["1", "0"]),
+        _arow("base", "p1", ["1", "0"]),
+        _arow("base", "p1", ["1", "1"]),
+    ]
+    assert st.alpha_per_calibration(rows) == {"base": None}
+
+
+def test_alpha_two_raters_perfect_agreement():
+    rows = [
+        _arow("base", "p1", ["1", "0"], "1"),
+        _arow("base", "p1", ["1", "0"], "2"),
+        _arow("base", "p2", ["0", "1"], "1"),
+        _arow("base", "p2", ["0", "1"], "2"),
+    ]
+    assert st.alpha_per_calibration(rows)["base"] == 1.0
+
+
+def test_alpha_two_raters_total_disagreement():
+    rows = [
+        _arow("base", "p1", ["1", "1"], "1"),
+        _arow("base", "p1", ["0", "0"], "2"),
+        _arow("base", "p2", ["1", "1"], "1"),
+        _arow("base", "p2", ["0", "0"], "2"),
+    ]
+    a = st.alpha_per_calibration(rows)["base"]
+    assert a is not None and a < 0.0
+
+
+def test_alpha_runs_aggregated_within_rater():
+    rows = [
+        _arow("base", "p1", ["1", "0"], "1"),
+        _arow("base", "p1", ["1", "1"], "1"),
+        _arow("base", "p1", ["1", "0"], "1"),
+        _arow("base", "p1", ["1", "0"], "2"),
+        _arow("base", "p2", ["0", "1"], "1"),
+        _arow("base", "p2", ["0", "1"], "2"),
+    ]
+    assert st.alpha_per_calibration(rows)["base"] == 1.0
+
+
 def _main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

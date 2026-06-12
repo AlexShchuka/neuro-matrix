@@ -260,16 +260,17 @@ def krippendorff_alpha_binary(
 def alpha_per_calibration(
     rows: list[dict[str, str]],
 ) -> dict[str, Optional[float]]:
-    """Compute α per calibration, aggregating units across probes.
+    """Krippendorff α per calibration across raters.
 
-    Each (probe_id × criterion_index) is one unit; raters provide 0/1 for
-    each (n/a positions are skipped — they did not apply to that probe).
+    Each (probe_id × criterion_index) is one unit. A rater's k runs are
+    aggregated (majority) to one rating before α is computed across raters,
+    so a single rater yields one rating per unit and α is skipped (None).
     """
     if not any("criterion_scores" in r and r.get("criterion_scores") for r in rows):
         return {}
-    by_calib_unit: dict[str, dict[tuple[str, int], list[int]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
+    by_calib_unit_rater: dict[
+        str, dict[tuple[str, int], dict[str, list[int]]]
+    ] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     for r in rows:
         cs = r.get("criterion_scores", "")
         if not cs:
@@ -279,14 +280,19 @@ def alpha_per_calibration(
             continue
         calib = r["calibration"]
         pid = r["probe_id"]
+        rater = r.get("rater", "1")
         for i, v in enumerate(scores):
             if v is None:
                 continue
-            by_calib_unit[calib][(pid, i)].append(v)
+            by_calib_unit_rater[calib][(pid, i)][rater].append(v)
 
     out: dict[str, Optional[float]] = {}
-    for calib, units in by_calib_unit.items():
-        ratings = list(units.values())
+    for calib, units in by_calib_unit_rater.items():
+        ratings = []
+        for per_rater in units.values():
+            ratings.append(
+                [1 if sum(v) * 2 >= len(v) else 0 for v in per_rater.values()]
+            )
         out[calib] = krippendorff_alpha_binary(ratings)
     return out
 
