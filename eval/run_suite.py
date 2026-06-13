@@ -56,6 +56,8 @@ response_path / score_total / passed (and optionally rater /
 criterion_scores), then run statistical_test.py.
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 import re
@@ -210,19 +212,23 @@ def main() -> int:
     prompts_root = Path(args.prompts_dir)
     prompts_root.mkdir(parents=True, exist_ok=True)
 
+    VANILLA_SENTINEL = "vanilla"
+
     csv_rows: list[dict[str, str]] = []
     for ref, label in refs:
-        calib = calibration_content(ref)
-        if not calib:
-            print(
-                f"Calibration at ref {ref} ({label}) empty — skipping",
-                file=sys.stderr,
-            )
-            continue
+        if ref == VANILLA_SENTINEL:
+            calib = ""
+        else:
+            calib = calibration_content(ref)
+            if not calib:
+                print(
+                    f"Calibration at ref {ref} ({label}) empty — skipping",
+                    file=sys.stderr,
+                )
+                continue
         out_dir = prompts_root / label
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write calibration file once per calibration label (caching mode).
         calib_path_str = ""
         if not args.legacy_prompts:
             calib_file = out_dir / "_calibration.txt"
