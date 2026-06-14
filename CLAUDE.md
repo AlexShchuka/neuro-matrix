@@ -79,6 +79,18 @@ Add stack-specific rules in `references/per-stack/<stack>.md`. Agents infer stac
 
 **Binding fallback.** If a role's `subagent_type` is not registered, invoke `general-purpose` with `agents/<name>.md` as system-prompt template.
 
+**Skill routing.** The table above is single-role dispatch. Skills package multi-step protocol procedures — consult BEFORE composing behaviour by hand; invoke via the `Skill` tool.
+
+| Trigger | Skill |
+|---|---|
+| Large parallel multi-agent build (≥3 agents or disjoint-scope nodes) — before fan-out | `agent-fleet-orchestration` (decompose, freeze contracts, close stages on evidence) |
+| Before any fleet / multi-agent output lands in shared state (pre-merge, pre-push, pre-deploy) | `adversarial-review` (independent adversary gate, not a helper) |
+| Design checklist · audit criterion for `adversarial-review` · source of mechanizable linter/CI rules | `robust-by-construction` |
+| Owner reports a harness gap or proposes a protocol change | `harness-improve` |
+| Implement / reproduce a method from a paper or quantitative source | `paper-to-code` |
+
+Counter: the two **orchestration** skills (`agent-fleet-orchestration`, `adversarial-review`) apply only to multi-agent / multi-stage work — a single-role, single-shot task uses the role agent directly. The **event-triggered** skills (`harness-improve`, `robust-by-construction`, `paper-to-code`) fire on their trigger regardless of scope.
+
 ## Agent invocation
 ```
 subagent_type: <specific>
