@@ -50,6 +50,15 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/auto-critic.sh"
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/skill-consult-check.sh"
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
