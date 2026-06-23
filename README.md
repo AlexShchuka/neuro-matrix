@@ -2,7 +2,7 @@
 
 A Claude Code plugin that calibrates an AI + developer co-system on common sense, scientific method, and Nash-equilibrium cooperation. Agents, hooks, an invariant-driven self-check, and a held-out evaluation harness.
 
-**What it is:** an anti-hallucination («anti-neuroslop») **harness for Claude Code** — runtime **invariants** with a per-turn self-check, deterministic **hooks**, four **agents** (developer · analyzer · critic · epistemic-auditor), a dual approval+verification gate, and a held-out **evaluation harness** that keep AI-assisted coding anchored to reality. *Topics: Claude Code plugin, AI agents, prompt engineering, LLM evaluation, AI code review, hooks, agentic, AI safety.*
+**What it is:** an anti-hallucination («anti-neuroslop») **harness for Claude Code** — runtime **invariants** with a per-turn self-check, deterministic **hooks**, five **agents** (developer · analyzer · critic · epistemic-auditor · translator), a dual approval+verification gate, and a held-out **evaluation harness** that keep AI-assisted coding anchored to reality. *Topics: Claude Code plugin, AI agents, prompt engineering, LLM evaluation, AI code review, hooks, agentic, AI safety.*
 
 ## Install
 
@@ -11,7 +11,7 @@ A Claude Code plugin that calibrates an AI + developer co-system on common sense
 /plugin install neuro-matrix@neuro-matrix
 ```
 
-Requires [Claude Code](https://code.claude.com). On install: a risk-weighted invariant self-check each turn, cycle / critic / verification hooks on mutations, four sub-agents for analysis, code, review, and epistemic audit.
+Requires [Claude Code](https://code.claude.com). On install: a risk-weighted invariant self-check each turn, cycle / critic / verification hooks on mutations, five sub-agents for analysis, code, review, epistemic audit, and codebook translation.
 
 The operating protocol lives in `CLAUDE.md`. This README answers: **why, on what concepts, how to work as a team, and what the project is for.**
 
@@ -94,6 +94,7 @@ Agents are bound to **roles** in the co-system. Names are current bindings; the 
 | `developer` | code mutator | Code, tests, build, git push — the only mutator |
 | `critic` | anti-neuroslop reviewer | Reviews proposed output before it lands in shared state |
 | `epistemic-auditor` | epistemic auditor | Boundary between confirmed and associative + developer-side mutual-doubt checks |
+| `translator` | codebook translator | Codebook A↔D, RU↔EN for AI-facing files, session condensation, abstraction-ladder rewrite |
 
 Stack specifics can be placed in `references/per-stack/<stack>.md`.
 

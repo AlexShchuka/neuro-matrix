@@ -29,6 +29,7 @@ on:
       - 'agents/**'
       - 'hooks/**'
       - 'eval/**'
+      - 'scripts/**'
   workflow_dispatch:
     inputs:
       smoke:

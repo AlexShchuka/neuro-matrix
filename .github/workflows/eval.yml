@@ -6,12 +6,12 @@ on:
   push:
     paths:
       - 'eval/**'
-      - 'scripts/check-eval-probes.py'
+      - 'scripts/**'
       - '.github/workflows/eval.yml'
   pull_request:
     paths:
       - 'eval/**'
-      - 'scripts/check-eval-probes.py'
+      - 'scripts/**'
       - '.github/workflows/eval.yml'
 
 jobs:
@@ -43,3 +43,42 @@ jobs:
             fi
           done
           echo "no canary leaks in generated prompts"
+
+  # Runs the selftest layer unconditionally so the enforcement scripts in
+  # scripts/ (selftest_*.sh) and the eval test_*.py suite actually gate CI
+  # instead of being decorative. bash + stdlib only; NO secrets are used or
+  # needed — these are deterministic regression probes.
+  selftests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        # scipy backs the Wilcoxon test exercised by eval/test_statistical_test.py;
+        # pinned to match eval-ci.yml. pytest runs the eval test_*.py suite.
+        run: pip install pytest scipy==1.15.3
+      - name: Run script selftests (scripts/selftest_*.sh)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          selftests=(scripts/selftest_*.sh)
+          if [ ${#selftests[@]} -eq 0 ]; then
+            echo "No scripts/selftest_*.sh found"; exit 1
+          fi
+          for t in "${selftests[@]}"; do
+            echo "::group::$t"
+            bash "$t"
+            echo "::endgroup::"
+          done
+      - name: Run eval test suite (pytest eval/test_*.py)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tests=(eval/test_*.py)
+          if [ ${#tests[@]} -gt 0 ]; then
+            pytest "${tests[@]}"
+          else
+            echo "No eval/test_*.py present — skipping pytest"
+          fi

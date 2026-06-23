@@ -98,6 +98,22 @@ sha256_of() {
 # Resolve default branch dynamically; fall back to origin/main.
 DEFAULT_REF="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||' || echo "origin/main")"
 
+# Fail CLOSED: the verdict is computed from `git diff ${DEFAULT_REF}...HEAD`. If the base
+# ref is unresolvable, that git diff exits 128 and — under `set -euo pipefail` — would abort
+# the whole hook. PreToolUse blocks only on exit 2, so an aborted hook lets the push proceed
+# UNGATED. Precheck the ref here and exit 2 (block) if it cannot be resolved.
+if ! git rev-parse --verify --quiet "${DEFAULT_REF}^{commit}" >/dev/null 2>&1; then
+  cat >&2 <<EOF
+auto-critic: cannot resolve base ref '${DEFAULT_REF}' — the critic/human gate cannot compute
+the branch diff, so the push is BLOCKED (fail-closed). Fetch the remote and ensure the base
+ref exists, e.g.:
+  git fetch origin
+  git rev-parse --verify ${DEFAULT_REF}
+Then re-run the original command.
+EOF
+  exit 2
+fi
+
 # If there is no marker file at all — fall through to block.
 if [[ ! -f "$MARKER" ]]; then
   :  # fall through
@@ -168,7 +184,31 @@ EOF
   fi
 
   # Recompute the diff sha256 now and compare.
-  LIVE_SHA="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null | sha256_of)"
+  # Capture the git diff rc explicitly (do NOT swallow it): on non-zero rc the diff is
+  # untrustworthy, so fail CLOSED with exit 2 rather than comparing a partial/empty hash.
+  # Note: declare first, then assign, so `set -e` does not abort on a non-zero git diff
+  # before DIFF_RC is captured (a failing command substitution in a bare assignment would
+  # trip ERR exit; the `|| DIFF_RC=$?` guard keeps the statement's own status zero).
+  DIFF_RC=0
+  LIVE_DIFF="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null)" || DIFF_RC=$?
+  if [[ "$DIFF_RC" -ne 0 ]]; then
+    cat >&2 <<EOF
+auto-critic: 'git diff ${DEFAULT_REF}...HEAD' failed (rc=${DIFF_RC}); the diff cannot be
+verified, so the push is BLOCKED (fail-closed). Resolve the git error and re-run.
+EOF
+    exit 2
+  fi
+  # Reject an empty / no-op diff: the empty byte stream hashes to the public empty-string
+  # constant (e3b0c442…), so a pre-written marker would pass for ANY empty diff. There is
+  # nothing for the critic to have reviewed — block.
+  if [[ -z "$LIVE_DIFF" ]]; then
+    cat >&2 <<EOF
+auto-critic: 'git diff ${DEFAULT_REF}...HEAD' is empty — there is no diff to review, and the
+empty diff hashes to the public empty-string constant. Push is BLOCKED (fail-closed).
+EOF
+    exit 2
+  fi
+  LIVE_SHA="$(printf '%s' "$LIVE_DIFF" | sha256_of)"
 
   if [[ "$LIVE_SHA" != "$STORED_SHA" ]]; then
     cat >&2 <<EOF
@@ -287,7 +327,20 @@ EOF
   fi
 
   # Recompute diff sha256 and compare.
-  H_LIVE_SHA="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null | sha256_of)"
+  # Capture the git diff rc explicitly (do NOT swallow it): on non-zero rc the diff is
+  # untrustworthy, so fail CLOSED with exit 2 rather than comparing a partial/empty hash.
+  # The `|| H_DIFF_RC=$?` guard keeps the statement's own status zero so `set -e` does not
+  # abort before the rc is captured.
+  H_DIFF_RC=0
+  H_LIVE_DIFF="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null)" || H_DIFF_RC=$?
+  if [[ "$H_DIFF_RC" -ne 0 ]]; then
+    cat >&2 <<EOF
+auto-critic: 'git diff ${DEFAULT_REF}...HEAD' failed (rc=${H_DIFF_RC}) at the human gate; the
+diff cannot be verified, so the push is BLOCKED (fail-closed). Resolve the git error and re-run.
+EOF
+    exit 2
+  fi
+  H_LIVE_SHA="$(printf '%s' "$H_LIVE_DIFF" | sha256_of)"
 
   if [[ "$H_LIVE_SHA" != "$H_STORED_SHA" ]]; then
     cat >&2 <<EOF
