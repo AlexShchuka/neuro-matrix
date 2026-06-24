@@ -86,6 +86,33 @@ else
   printf 'PASS  case-b: non-matching description produced no nudge, exit 0\n'
 fi
 
+# ── Case (b2): near-miss substrings → silence, exit 0 ────────────────────────
+# These words CONTAIN skill-keyword substrings (decode⊃code, agentic⊃agent,
+# preview⊃review) but are not whole-word matches.  A plain `grep -F` would
+# false-fire here; word-boundary matching must stay silent (anti-N10).
+JSON_NEARMISS="$(cat <<'EOF'
+{
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "decode the base64 payload",
+    "prompt": "Write an agentic helper and preview the agentic output."
+  }
+}
+EOF
+)"
+
+run_hook "$JSON_NEARMISS"
+
+if [[ "$HOOK_EXIT" -ne 0 ]]; then
+  printf 'FAIL  case-b2: hook exited %d (expected 0)\n' "$HOOK_EXIT"
+  failures=$((failures + 1))
+elif [[ -n "$HOOK_STDERR" ]]; then
+  printf 'FAIL  case-b2: substring near-miss false-fired a nudge: %s\n' "$HOOK_STDERR"
+  failures=$((failures + 1))
+else
+  printf 'PASS  case-b2: substring near-miss produced no nudge, exit 0\n'
+fi
+
 # ── Case (c): non-Agent tool → silence, exit 0 ───────────────────────────────
 JSON_BASH="$(cat <<'EOF'
 {

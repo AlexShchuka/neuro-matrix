@@ -14,7 +14,7 @@ Legend: ☐ todo · ⭐ critical path (without these there is no visibility).
 Repo home → the ⚙️ next to **About** (top-right).
 - **Description** (paste):
   ```
-  Anti-neuroslop harness for Claude Code: runtime invariants, hooks, four agents, a dual approval+verification gate, and a held-out eval harness that keep AI-assisted coding anchored to reality.
+  Anti-neuroslop harness for Claude Code: runtime invariants, hooks, five agents, a dual approval+verification gate, and a held-out eval harness that keep AI-assisted coding anchored to reality.
   ```
 - **Website**: `https://alexshchuka.github.io/neuro-matrix/`  *(leave blank until Pages is on — see below)*
 - **Topics** (add each):
@@ -34,7 +34,7 @@ Submitting before merge = broken `/plugin marketplace add` for the first visitor
 ### ☐ Submit to the Anthropic official directory
 The curated `anthropics/claude-plugins-official` directory is the primary "Discover" surface; submission goes through their plugin-directory form (expect a quality/security review). **License note:** the project is now under the MIT License (OSI-approved, permissive). Coordinate with issue #4 on what is exposed before submitting. Submission blurb:
 ```
-neuro-matrix is a Claude Code plugin that keeps AI-assisted coding anchored to reality — runtime invariants with a per-turn self-check, four agents (developer/analyzer/critic/epistemic-auditor), hooks, a dual approval+verification gate, and a held-out evaluation harness. Anti-"neuroslop" AI + developer co-system, designed under game theory and systems theory.
+neuro-matrix is a Claude Code plugin that keeps AI-assisted coding anchored to reality — runtime invariants with a per-turn self-check, five agents (developer/analyzer/critic/epistemic-auditor/translator), hooks, a dual approval+verification gate, and a held-out evaluation harness. Anti-"neuroslop" AI + developer co-system, designed under game theory and systems theory.
 ```
 
 ### ☐ Open PRs into awesome-lists
@@ -45,7 +45,7 @@ Highest-ROI discovery channel for Claude Code plugins. For each, read its `CONTR
 
 Entry (universal `- [name](url) — desc` format):
 ```markdown
-- [neuro-matrix](https://github.com/AlexShchuka/neuro-matrix) — Anti-neuroslop AI + developer co-system: runtime invariants, agents (developer/analyzer/critic/epistemic-auditor), hooks, and a dual approval+verification gate. Keeps AI-assisted coding anchored to reality.
+- [neuro-matrix](https://github.com/AlexShchuka/neuro-matrix) — Anti-neuroslop AI + developer co-system: runtime invariants, agents (developer/analyzer/critic/epistemic-auditor/translator), hooks, and a dual approval+verification gate. Keeps AI-assisted coding anchored to reality.
 ```
 
 ### ☐ Publish the Habr article (issue #3) + cross-post

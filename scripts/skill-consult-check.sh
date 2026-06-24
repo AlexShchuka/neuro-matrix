@@ -48,7 +48,7 @@ while IFS= read -r skill_file; do
   done
 
   for kw in "${keywords[@]}"; do
-    if printf '%s' "$HAYSTACK" | grep -qF "$kw"; then
+    if printf '%s' "$HAYSTACK" | grep -qiwE "$kw"; then
       MATCHED_SKILL="$skill_name"
       break 2
     fi

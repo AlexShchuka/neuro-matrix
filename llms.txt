@@ -1,6 +1,6 @@
 # neuro-matrix
 
-> A Claude Code plugin (harness) that keeps AI-assisted coding anchored to common sense and reality — an anti-"neuroslop" AI + developer co-system. It contributes runtime invariants with a randomized per-turn self-check, deterministic hooks (cycle-detector, approval gate, verification gate), four agents (developer, analyzer, critic, epistemic-auditor), and a held-out evaluation harness. Designed under game theory (Nash-style cooperative equilibrium) and systems theory.
+> A Claude Code plugin (harness) that keeps AI-assisted coding anchored to common sense and reality — an anti-"neuroslop" AI + developer co-system. It contributes runtime invariants with a randomized per-turn self-check, deterministic hooks (cycle-detector, approval gate, verification gate), five agents (developer, analyzer, critic, epistemic-auditor, translator), and a held-out evaluation harness. Designed under game theory (Nash-style cooperative equilibrium) and systems theory.
 
 ## Core protocol
 - [CLAUDE.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/CLAUDE.md): the operating protocol — focus goal (common sense + reality), hard prohibitions, mutation/mental-model/halt gates, epistemic boundary, request routing.
@@ -13,6 +13,7 @@
 - [agents/analyzer.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/agents/analyzer.md): system investigator — RCA, design, review, dead-end diagnostics.
 - [agents/critic.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/agents/critic.md): anti-neuroslop reviewer — the approval gate before output lands.
 - [agents/epistemic-auditor.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/agents/epistemic-auditor.md): separates confirmed from associative claims; developer-side mutual-doubt checks.
+- [agents/translator.md](https://github.com/AlexShchuka/neuro-matrix/blob/main/agents/translator.md): codebook translator — codebook A↔D, RU↔EN for AI-facing files, session condensation, abstraction-ladder rewrite.
 
 ## Hooks and scripts
 - [hooks/hooks.json](https://github.com/AlexShchuka/neuro-matrix/blob/main/hooks/hooks.json): event wiring for the operational gates.

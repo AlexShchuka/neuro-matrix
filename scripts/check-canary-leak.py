@@ -51,6 +51,13 @@ def main() -> int:
 
     print(f"Checked {checked} response(s); {missing_responses} response_path entries missing on disk.")
 
+    if checked == 0 and missing_responses > 0:
+        print(
+            f"VACUOUS GREEN — 0 responses checked but {missing_responses} "
+            "response_path entries missing on disk; nothing was actually verified."
+        )
+        return 1
+
     if not leaks:
         print("No canary leaks detected.")
         return 0
