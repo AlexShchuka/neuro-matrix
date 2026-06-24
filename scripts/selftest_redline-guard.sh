@@ -2,6 +2,23 @@
 # selftest_redline-guard.sh — regression probe for scripts/redline-guard.sh
 #
 # Asserts:
+#   BLOCK (exit 2) for adversarial bypass attempts (git global flags, detached HEAD,
+#         path-to-git, command wrapper, full refname):
+#     X01  git --no-pager push --force
+#     X02  git --paginate push -f
+#     X03  git --bare push --no-verify
+#     X04  git --literal-pathspecs push --force
+#     X05  git --no-pager merge main
+#     X06  git --no-pager rebase master
+#     X07  git status && git --no-pager push --force  (global flag in chain)
+#     X08  git merge feature-branch on detached-HEAD-at-main  (bug 3 fix)
+#     X11  /usr/bin/git push --force   (path-to-git bypass)
+#     X12  command git push -f          (command wrapper bypass)
+#     X13  git merge refs/heads/main    (full refname onto-main bypass)
+#   ALLOW (exit 0) for false-block regression cases:
+#     X09  git push origin feat && tar -xf a.tar  (tar -f must not trigger force-push)
+#     X10  git push origin feat && echo +done     (+token in echo must not trigger refspec)
+#
 #   BLOCK (exit 2) for each hard-prohibited redline variant:
 #     B01  git push --force
 #     B02  git push -f
@@ -141,6 +158,69 @@ assert_non_bash_passthrough() {
     fail "$label: non-Bash tool [$tool] should exit 0, got exit $GUARD_EXIT"
   fi
 }
+
+# ── Adversarial: git global flag bypass cases (BLOCK) ────────────────────────
+# These were false-ALLOWs before the fix: value-less git global options
+# (--no-pager, --paginate, --bare, --literal-pathspecs) defeated the old
+# subcommand detector.  The new per-segment walker skips them correctly.
+
+assert_block "X01 git --no-pager push --force"         "git --no-pager push --force"
+assert_block "X02 git --paginate push -f"               "git --paginate push -f"
+assert_block "X03 git --bare push --no-verify"          "git --bare push --no-verify"
+assert_block "X04 git --literal-pathspecs push --force" "git --literal-pathspecs push --force"
+assert_block "X05 git --no-pager merge main"            "git --no-pager merge main"
+assert_block "X06 git --no-pager rebase master"         "git --no-pager rebase master"
+assert_block "X07 git --no-pager push --force in chain" "git status && git --no-pager push --force"
+
+# Path-to-git: token basename is `git` but the token itself is a full path.
+assert_block "X11 /usr/bin/git push --force"  "/usr/bin/git push --force"
+# Shell built-in wrapper: `command git` — the `command` token is skipped, git is found next.
+assert_block "X12 command git push -f"         "command git push -f"
+# Full refname onto-main: basename of refs/heads/main is `main` → must block.
+assert_block "X13 git merge refs/heads/main"   "git merge refs/heads/main"
+
+# ── Adversarial: detached-HEAD-at-main (BLOCK) ───────────────────────────────
+# Create a temporary git repo, commit to main, detach HEAD at that commit,
+# then attempt a git merge.  Must be blocked (bug 3 fix).
+_TMP_REPO="$(mktemp -d)"
+(
+  cd "$_TMP_REPO"
+  git init -q
+  git config user.email "test@test"
+  git config user.name "test"
+  git commit -q --allow-empty -m "init"
+  # Rename default branch to main.
+  git branch -m main 2>/dev/null || true
+  # Detach HEAD at the same commit that main points to.
+  git checkout -q --detach HEAD
+) >/dev/null 2>&1
+
+# Run the guard with CWD set to the temp repo so git rev-parse works.
+_detached_exit=0
+_detached_json="$(jq -cn --arg cmd "git merge feature-branch" \
+  '{"tool_name":"Bash","tool_input":{"command":$cmd}}')"
+_detached_stderr="$(
+  cd "$_TMP_REPO"
+  printf '%s' "$_detached_json" | bash "$SCRIPT" 2>&1 1>/dev/null
+)" || _detached_exit=$?
+
+rm -rf "$_TMP_REPO"
+
+if [[ "$_detached_exit" -eq 2 ]]; then
+  ok "X08 git merge on detached-HEAD-at-main (blocked as required, exit 2)"
+  pass=$((pass + 1))
+else
+  fail "X08 git merge on detached-HEAD-at-main: expected exit 2 (BLOCK), got exit $_detached_exit"
+  failures=$((failures + 1))
+fi
+
+# ── Adversarial: false-block regression (ALLOW) ──────────────────────────────
+# These were false-BLOCKs before the fix: the -f/-xf flag in a subsequent
+# command (tar) and the +done token in echo were matching the whole command
+# string.  Scoping checks to push args only fixes this.
+
+assert_allow "X09 git push feat && tar -xf (no false-block on tar -f)"  "git push origin feat && tar -xf a.tar"
+assert_allow "X10 git push feat && echo +done (no false-block on +token)" "git push origin feat && echo +done"
 
 # ── BLOCK cases ───────────────────────────────────────────────────────────────
 
