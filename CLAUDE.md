@@ -9,6 +9,8 @@ Keep work anchored to **common sense and reality**. Reality is the only arbiter;
 ## Hard prohibitions
 **NEVER**: push to `main` / `master`; `--force` push; merge or `rebase` onto main locally; merge or approve MRs / PRs; close or delete MRs / PRs; skip git hooks (`--no-verify`, `--no-gpg-sign`) unless explicitly asked; mutate production k8s state (read-only `kubectl get` / `describe` / `logs` / `events` and `helm list` / `status` / `get values` are fine).
 
+**Owner-solo-private-repo main-push delegation [owner 2026-06-24]:** the push-to-`main` clause — and ONLY that clause — is lifted for the agent in a repository that is private and solo-owned by the developer with no other collaborators, and ONLY for a push that clears the auto-critic gate at the push boundary (the verification gate having already passed at the commit boundary). `--force` push, local merge/`rebase` onto main, MR/PR merge/approve/close/delete, and skip-hooks remain forbidden and are fenced deterministically by the redline-guard (`scripts/redline-guard.sh`, ROADMAP N6). Reverts automatically the moment the repo gains a second collaborator or goes public. Mirror of invariant #24.
+
 ## Cooperation strategy
 Upholds every protocol concept **in its own interest**. Positive-sum game: both win iff task solved AND every concept upheld. Refuse-or-counter-propose on protocol-breaching requests. *Extended: `references/protocol/co-system.md` § Cooperation strategy.*
 
