@@ -1,61 +1,48 @@
 #!/usr/bin/env bash
-# PreToolUse hook: requires an @critic verdict before any `git push` or `glab mr create`.
-# Blocks (exit 2) the mutation and emits an instruction for the lead agent to invoke @critic
-# on the full accumulated branch diff / MR draft. The agent re-runs the command after
-# writing a verdict file (`~/.claude-critic-approved`, TTL 5 minutes, single-use) that
-# records the critic's decision and a SHA-256 of the exact diff that was reviewed.
-# The marker is consumed on use — every subsequent push / MR-create needs a fresh critic pass.
+# PreToolUse hook: requires a DUAL CO-SIGN before any `git push` or `glab mr create`.
+# Blocks (exit 2) the mutation until BOTH co-sign markers are present and fresh, then
+# consumes them (single-use). This replaces the former sha-verdict scheme — there is no
+# longer any sha256 of the diff, and no git-diff hashing at all. Removing the hash compare
+# kills the rtk-wraps-git-diff mismatch pain: the gate no longer depends on the exact bytes
+# of `git diff` (which rtk and other wrappers can perturb), only on two co-sign markers.
 #
-# Rationale: the @critic sub-agent already exists in this plugin's routing table but is
-# invoked only when the lead agent remembers to. The cheapest moments to land neuroslop in
-# shared state are the push and the MR-create — commit is local and reversible. Making the
-# critic call mandatory at the push boundary means the critic reviews the FULL accumulated
-# branch diff once before it lands in shared state, instead of every local commit. Local
-# commits stay ungated — the verification gate (verification-gate.sh) still covers them
-# with machine checks (shell syntax, Python syntax, JSON validity).
+# Co-sign model (C2): the push unlocks IFF BOTH co-signers have signed:
+#   ~/.claude-cosign-owner   containing the line:  cosign: owner
+#   ~/.claude-cosign-claude  containing the line:  cosign: claude
+# Each marker is fresh (TTL 300 s) and single-use (consumed with `rm -f` on check). The two
+# co-signers are the owner and Claude — the same pair that co-reviews the storozh flags. The
+# push is the moment they both put their name on what lands in shared state.
 #
-# Verdict file contract (both lines required, order-insensitive):
-#   verdict: approve
-#   diff-sha256: <sha256 of the exact bytes of git diff origin/<default-branch>...HEAD>
+# Marker contract (one required line each):
+#   ~/.claude-cosign-owner   →  cosign: owner
+#   ~/.claude-cosign-claude  →  cosign: claude
+# Any missing marker, stale marker (age > 300 s), empty marker, or wrong/absent cosign line
+# → block (exit 2). Both markers are consumed on every check (pass or block), so each retry
+# requires BOTH co-signers to sign again — there is no partial-credit and no single-use bypass.
 #
-# The hook recomputes the sha256 at push time and compares; any mismatch, missing field,
-# missing file, or expired TTL → block (exit 2).
+# Trust-model limitation: the hook cannot technically verify WHO wrote each marker — it only
+# verifies the file exists, is fresh, and carries the right cosign line. The owner marker is
+# meant to be written by the human owner; writing ~/.claude-cosign-owner from inside the agent
+# is a protocol violation (the gate is a friction point and an audit trail, not a cryptographic
+# proof). The same trust model that governed the former human-token gate applies here.
 #
-# Owner escape hatch: a verdict file containing the line `bypass: owner-accepted-risk`
-# skips the hash check entirely, but the hook prints a prominent stderr warning and still
-# consumes the marker. An empty / bare `touch` file is rejected outright — it no longer
-# satisfies the gate.
+# Protocol-path rule (STRICT, no degradation): for protocol-artifact paths
+# (invariants*, agents/, hooks/, skills/, eval/, references/protocol/, scripts/, CLAUDE.md —
+# see protocol_path_matches()) BOTH markers are required by exactly the same rule — there is
+# NO bypass and NO degraded single-marker path. Because both markers are always required for
+# every push, a protocol-path push is held to the identical bar as any other push; the
+# protocol-path detection is retained as an audit signal in the block message, not as a second,
+# weaker gate. Fail-closed on any missing marker, for protocol and non-protocol paths alike.
 #
-# Default branch is resolved dynamically via `git symbolic-ref refs/remotes/origin/HEAD`;
-# falls back to `origin/main` when the remote HEAD is not set (same as the block message).
+# Rationale: the cheapest moment to land neuroslop in shared state is the push / MR-create —
+# commit is local and reversible. Requiring two independent co-signs (owner AND Claude) at the
+# push boundary means neither co-signer alone can land shared state, and the storozh advisory
+# flags (skills/storozh) are co-reviewed by exactly this pair before they sign. Local commits
+# stay ungated — the verification gate (verification-gate.sh) still covers them with machine
+# checks (shell syntax, Python syntax, JSON validity).
 #
-# Marker mechanics: single-use, TTL 5 min, consumed on use — every subsequent push /
-# MR-create needs a fresh critic pass and a new verdict file.
-#
-# ── Human gate (п.2) ────────────────────────────────────────────────────────
-# After the critic gate passes, a second gate checks whether any changed path
-# is a protocol artifact (invariants.txt, agents/, hooks/, eval/, CLAUDE.md,
-# references/protocol/, scripts/).  Protocol paths are the enforcement layer;
-# changes to them must be approved by the human owner, not the agent.
-#
-# Human marker contract (both lines required, order-insensitive):
-#   approved-by: human
-#   diff-sha256: <sha256 of git diff origin/<default-branch>...HEAD>
-#
-# Trust-model limitation: the hook cannot technically verify that the writer
-# of ~/.claude-human-approved is a human — it only verifies the file exists,
-# is fresh (TTL 300 s), and contains a matching sha256.  Writing this marker
-# from inside the agent is a protocol violation; the same trust model applies
-# as `bypass: owner-accepted-risk` — it works mechanically but breaks the
-# co-system contract.  The gate is a friction point and an audit trail, not a
-# cryptographic proof.
-#
-# Human marker mechanics: single-use, TTL 300 s, consumed on check (same as
-# critic marker).  Non-protocol diffs skip this gate entirely.
-# Combined retry cost: the critic marker is consumed at check time (line ~100)
-# before the human gate is reached — a human-gate block on a protocol diff
-# still burns the critic marker, so each retry requires BOTH a fresh critic
-# pass AND a fresh human marker.
+# Marker mechanics: single-use, TTL 300 s, consumed on check — every subsequent push /
+# MR-create needs a fresh pair of co-sign markers.
 
 set -euo pipefail
 
@@ -74,8 +61,17 @@ TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null || echo
 COMMAND="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null || echo "")"
 [[ -n "$COMMAND" ]] || exit 0
 
+# Push detector. `git` may carry intervening GLOBAL options before the `push` subcommand
+# (e.g. `git -C <path> push`, `git --git-dir=... push`, `git -c k=v push`). The former
+# matcher required `git` immediately followed by `push`, so any global option slipped the
+# gate entirely (ungated push) — exactly what this gate exists to stop. The group below
+# tolerates zero or more global-option tokens between `git` and `push`: each is a dash
+# option (`-x` / `--x[=v]`), optionally followed by ONE non-dash argument token (`-C` takes
+# a path, `--git-dir` may take a separate value). It deliberately does NOT swallow `push`
+# itself (a non-dash token is only consumed right after a dash option), so `git push` and
+# `git -C /tmp/x push` both match while bare subcommands like `git status` do not.
 matches=0
-if printf '%s' "$COMMAND" | grep -qE '(^|[[:space:];&|(])git[[:space:]]+push([[:space:]]|$)'; then
+if printf '%s' "$COMMAND" | grep -qE '(^|[[:space:];&|(])git[[:space:]]+(-[^[:space:]]+([[:space:]]+[^-][^[:space:]]*)?[[:space:]]+)*push([[:space:]]|$)'; then
   matches=1
 fi
 if printf '%s' "$COMMAND" | grep -qE '(^|[[:space:];&|(])glab[[:space:]]+mr[[:space:]]+create([[:space:]]|$)'; then
@@ -83,303 +79,122 @@ if printf '%s' "$COMMAND" | grep -qE '(^|[[:space:];&|(])glab[[:space:]]+mr[[:sp
 fi
 [[ "$matches" -eq 1 ]] || exit 0
 
-MARKER="${HOME}/.claude-critic-approved"
-CRITIC_PASSED=0
+COSIGN_OWNER="${HOME}/.claude-cosign-owner"
+COSIGN_CLAUDE="${HOME}/.claude-cosign-claude"
+COSIGN_TTL=300
 
-# Portable sha256: prefer sha256sum (Linux/GNU), fall back to shasum -a 256 (macOS).
-sha256_of() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | awk '{print $1}'
-  else
-    shasum -a 256 | awk '{print $1}'
+# check_cosign <marker-path> <expected-role>
+#   Validates one co-sign marker. ALWAYS consumes the marker if it exists (single-use),
+#   whether it passes or fails. Echoes a one-line reason to stdout on failure (caller routes
+#   it to the block message); returns 0 on a valid, fresh, correctly-signed marker, else 1.
+check_cosign() {
+  local marker="$1" role="$2"
+  local now mtime age content line
+
+  if [[ ! -f "$marker" ]]; then
+    echo "missing marker ${marker} (cosign: ${role})"
+    return 1
   fi
+
+  now=$(date +%s)
+  mtime=$(stat -c %Y "$marker" 2>/dev/null || stat -f %m "$marker" 2>/dev/null || echo "$now")
+  age=$(( now - mtime ))
+
+  # Always consume (single-use), whether we pass or block.
+  content="$(cat "$marker")"
+  rm -f "$marker"
+
+  if [[ "$age" -gt "$COSIGN_TTL" ]]; then
+    echo "stale marker ${marker} (age ${age}s > ${COSIGN_TTL}s TTL) — cosign: ${role} must be re-signed"
+    return 1
+  fi
+
+  # Empty / bare touch → reject.
+  if [[ -z "$content" ]] || ! printf '%s' "$content" | grep -q '.'; then
+    echo "empty marker ${marker} — a bare touch does not satisfy the gate; write the line 'cosign: ${role}'"
+    return 1
+  fi
+
+  # Require the exact cosign line for this role.
+  line="$(printf '%s' "$content" | grep "^cosign: ${role}$" | head -1 || true)"
+  if [[ -z "$line" ]]; then
+    echo "marker ${marker} is missing the required line 'cosign: ${role}'"
+    return 1
+  fi
+
+  return 0
 }
 
-# Resolve default branch dynamically; fall back to origin/main.
+# Detect whether any changed path is a protocol artifact (audit signal only — the rule below
+# is identical for protocol and non-protocol paths: BOTH markers required, strictly).
+# Resolve default branch dynamically; fall back to origin/main. The diff is used ONLY to list
+# changed names for the audit signal — there is NO hashing of its contents anywhere.
 DEFAULT_REF="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||' || echo "origin/main")"
-
-# Fail CLOSED: the verdict is computed from `git diff ${DEFAULT_REF}...HEAD`. If the base
-# ref is unresolvable, that git diff exits 128 and — under `set -euo pipefail` — would abort
-# the whole hook. PreToolUse blocks only on exit 2, so an aborted hook lets the push proceed
-# UNGATED. Precheck the ref here and exit 2 (block) if it cannot be resolved.
-if ! git rev-parse --verify --quiet "${DEFAULT_REF}^{commit}" >/dev/null 2>&1; then
-  cat >&2 <<EOF
-auto-critic: cannot resolve base ref '${DEFAULT_REF}' — the critic/human gate cannot compute
-the branch diff, so the push is BLOCKED (fail-closed). Fetch the remote and ensure the base
-ref exists, e.g.:
-  git fetch origin
-  git rev-parse --verify ${DEFAULT_REF}
-Then re-run the original command.
-EOF
-  exit 2
-fi
-
-# If there is no marker file at all — fall through to block.
-if [[ ! -f "$MARKER" ]]; then
-  :  # fall through
-else
-  NOW=$(date +%s)
-  MTIME=$(stat -c %Y "$MARKER" 2>/dev/null || stat -f %m "$MARKER" 2>/dev/null || echo "$NOW")
-  AGE=$(( NOW - MTIME ))
-
-  # Always consume the marker (single-use), whether we pass or block.
-  MARKER_CONTENT="$(cat "$MARKER")"
-  rm -f "$MARKER"
-
-  if [[ "$AGE" -gt 300 ]]; then
-    # Stale marker; fall through to block with a note.
-    cat >&2 <<EOF
-auto-critic: verdict file expired (age ${AGE}s > 300s TTL). Run a fresh critic pass and write a new verdict file.
-EOF
-    exit 2
-  fi
-
-  # Empty / bare touch → reject with new-contract message.
-  if [[ -z "$MARKER_CONTENT" ]] || ! printf '%s' "$MARKER_CONTENT" | grep -q '.'; then
-    cat >&2 <<'EOF'
-auto-critic: the verdict file is empty. A bare `touch ~/.claude-critic-approved` no longer satisfies the gate.
-
-Write the file with both required lines AFTER a real critic pass:
-    verdict: approve
-    diff-sha256: <output of: git diff origin/<default-branch>...HEAD | sha256sum | awk '{print $1}'>
-EOF
-    exit 2
-  fi
-
-  # Owner escape hatch — explicit and loud.
-  if printf '%s' "$MARKER_CONTENT" | grep -q '^bypass: owner-accepted-risk$'; then
-    cat >&2 <<'EOF'
-
-========================================================================
-auto-critic: AUDITED BYPASS — owner-accepted-risk was set in verdict file.
-Hash check skipped. This bypass is intentional and carries owner risk.
-Ensure an @critic review is completed at the next appropriate checkpoint.
-========================================================================
-
-EOF
-    exit 0
-  fi
-
-  # Parse required fields.
-  VERDICT_LINE="$(printf '%s' "$MARKER_CONTENT" | grep '^verdict: ' | head -1 || true)"
-  SHA_LINE="$(printf '%s' "$MARKER_CONTENT" | grep '^diff-sha256: ' | head -1 || true)"
-
-  if [[ -z "$VERDICT_LINE" ]] || [[ -z "$SHA_LINE" ]]; then
-    cat >&2 <<'EOF'
-auto-critic: verdict file is missing required fields. Both lines are required:
-    verdict: approve
-    diff-sha256: <sha256 of git diff origin/<default-branch>...HEAD>
-EOF
-    exit 2
-  fi
-
-  VERDICT="$(printf '%s' "$VERDICT_LINE" | sed 's/^verdict: //')"
-  STORED_SHA="$(printf '%s' "$SHA_LINE" | sed 's/^diff-sha256: //')"
-
-  if [[ "$VERDICT" != "approve" ]]; then
-    cat >&2 <<EOF
-auto-critic: verdict is '${VERDICT}', not 'approve'. Address the flagged items and run a fresh critic pass.
-EOF
-    exit 2
-  fi
-
-  # Recompute the diff sha256 now and compare.
-  # Capture the git diff rc explicitly (do NOT swallow it): on non-zero rc the diff is
-  # untrustworthy, so fail CLOSED with exit 2 rather than comparing a partial/empty hash.
-  # Note: declare first, then assign, so `set -e` does not abort on a non-zero git diff
-  # before DIFF_RC is captured (a failing command substitution in a bare assignment would
-  # trip ERR exit; the `|| DIFF_RC=$?` guard keeps the statement's own status zero).
-  DIFF_RC=0
-  LIVE_DIFF="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null)" || DIFF_RC=$?
-  if [[ "$DIFF_RC" -ne 0 ]]; then
-    cat >&2 <<EOF
-auto-critic: 'git diff ${DEFAULT_REF}...HEAD' failed (rc=${DIFF_RC}); the diff cannot be
-verified, so the push is BLOCKED (fail-closed). Resolve the git error and re-run.
-EOF
-    exit 2
-  fi
-  # Reject an empty / no-op diff: the empty byte stream hashes to the public empty-string
-  # constant (e3b0c442…), so a pre-written marker would pass for ANY empty diff. There is
-  # nothing for the critic to have reviewed — block.
-  if [[ -z "$LIVE_DIFF" ]]; then
-    cat >&2 <<EOF
-auto-critic: 'git diff ${DEFAULT_REF}...HEAD' is empty — there is no diff to review, and the
-empty diff hashes to the public empty-string constant. Push is BLOCKED (fail-closed).
-EOF
-    exit 2
-  fi
-  LIVE_SHA="$(printf '%s' "$LIVE_DIFF" | sha256_of)"
-
-  if [[ "$LIVE_SHA" != "$STORED_SHA" ]]; then
-    cat >&2 <<EOF
-auto-critic: diff-sha256 mismatch — the diff has changed since critic reviewed it.
-
-  Stored: ${STORED_SHA}
-  Current: ${LIVE_SHA}
-
-Run a fresh critic pass on the current diff, then regenerate the verdict file:
-  1. git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}'
-  2. Write ~/.claude-critic-approved with:
-         verdict: approve
-         diff-sha256: <hash from step 1>
-EOF
-    exit 2
-  fi
-
-  # All checks passed — fall through to human gate below.
-  CRITIC_PASSED=1
-fi
-
-# If critic marker was missing (CRITIC_PASSED not set) — emit the full instruction block.
-if [[ "${CRITIC_PASSED:-0}" -ne 1 ]]; then
-  LIVE_SHA_HINT="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null | sha256_of || echo "<run: git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}'>")"
-  cat >&2 <<EOF
-auto-critic: a mandatory critic check is required before this mutation.
-
-1. Invoke the critic sub-agent with:
-   - for \`git push\` — the full branch diff (\`git diff ${DEFAULT_REF}...HEAD\`) plus the branch name and intended PR/MR summary;
-   - for \`glab mr create\` — the MR title, description, and a diff summary.
-   Include an \`<inherited-invariants>\` block (use \`scripts/role-invariants.sh critic\`) in the prompt.
-   If the \`critic\` subagent_type from this plugin (\`neuro-matrix:critic\`) is not registered
-   in the current environment, fall back to \`general-purpose\` with the body of \`agents/critic.md\`
-   as the system-prompt template. The role contract is stable; the binding is not.
-
-2. If critic returns \`approve\`, compute the diff sha256 and write the verdict file as a
-   SEPARATE command before re-running the original command:
-
-       DIFF_SHA=\$(git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}')
-       printf 'verdict: approve\ndiff-sha256: %s\n' "\$DIFF_SHA" > ~/.claude-critic-approved
-
-   Then re-run the original command.
-
-   Current diff sha256 (for reference): ${LIVE_SHA_HINT}
-
-3. If critic returns \`fix-required\` — address the flagged items first, then loop again from step 1.
-
-Owner bypass (risk accepted, audit trail required):
-   printf 'bypass: owner-accepted-risk\n' > ~/.claude-critic-approved
-   (A prominent warning will be emitted; the bypass is single-use and TTL-bound.)
-EOF
-  exit 2
-fi
-
-# ── Human gate ──────────────────────────────────────────────────────────────
-# Detect whether any changed path is a protocol artifact (via sourced helper).
 PROTOCOL_CHANGED=0
 MATCHED_PATHS=""
 while IFS= read -r changed_path; do
+  [[ -n "$changed_path" ]] || continue
   if protocol_path_matches "$changed_path"; then
     PROTOCOL_CHANGED=1
     MATCHED_PATHS="${MATCHED_PATHS}  ${changed_path}"$'\n'
   fi
 done < <(git diff --name-only "${DEFAULT_REF}...HEAD" 2>/dev/null || true)
 
-if [[ "$PROTOCOL_CHANGED" -eq 0 ]]; then
-  # Non-protocol diff — no human gate required.
+# Evaluate BOTH co-sign markers. check_cosign always consumes, so both are read (and removed)
+# on every invocation — no partial-credit, no single-marker degraded path.
+# Declare-then-assign with `|| OK=$?` so a non-zero check_cosign (the common missing-marker
+# path) does not trip `set -e` before the rc is captured — the guard keeps each statement's
+# own status zero, mirroring the DIFF_RC pattern the former hash-gate used.
+OWNER_OK=0
+OWNER_REASON="$(check_cosign "$COSIGN_OWNER" owner)" || OWNER_OK=$?
+CLAUDE_OK=0
+CLAUDE_REASON="$(check_cosign "$COSIGN_CLAUDE" claude)" || CLAUDE_OK=$?
+
+if [[ "$OWNER_OK" -eq 0 && "$CLAUDE_OK" -eq 0 ]]; then
+  # Both co-signers present, fresh, valid — and now consumed. Push unlocks.
   exit 0
 fi
 
-# Protocol paths changed — check human marker.
-HUMAN_MARKER="${HOME}/.claude-human-approved"
-
-if [[ -f "$HUMAN_MARKER" ]]; then
-  NOW_H=$(date +%s)
-  MTIME_H=$(stat -c %Y "$HUMAN_MARKER" 2>/dev/null || stat -f %m "$HUMAN_MARKER" 2>/dev/null || echo "$NOW_H")
-  AGE_H=$(( NOW_H - MTIME_H ))
-
-  # Always consume (single-use), whether we pass or block.
-  HUMAN_CONTENT="$(cat "$HUMAN_MARKER")"
-  rm -f "$HUMAN_MARKER"
-
-  if [[ "$AGE_H" -gt 300 ]]; then
-    cat >&2 <<EOF
-auto-critic: human-gate marker expired (age ${AGE_H}s > 300s TTL).
-The marker must be written by the human owner. Re-run the approval command:
-  DIFF_SHA=\$(git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}')
-  printf 'approved-by: human\ndiff-sha256: %s\n' "\$DIFF_SHA" > ~/.claude-human-approved
-EOF
-    exit 2
+# Fail CLOSED: at least one marker is missing / stale / invalid. Emit the block message and
+# exit 2 (PreToolUse blocks only on exit 2).
+{
+  echo "auto-critic: push BLOCKED — a DUAL CO-SIGN is required before this mutation (fail-closed)."
+  echo
+  echo "Both co-sign markers must be present, fresh (TTL ${COSIGN_TTL}s), and single-use:"
+  echo "  ~/.claude-cosign-owner   containing:  cosign: owner"
+  echo "  ~/.claude-cosign-claude  containing:  cosign: claude"
+  echo
+  echo "Status this attempt (both markers are consumed on every check — re-sign both to retry):"
+  if [[ "$OWNER_OK" -eq 0 ]]; then
+    echo "  owner  : OK (consumed)"
+  else
+    echo "  owner  : MISSING/INVALID — ${OWNER_REASON}"
   fi
-
-  # Parse required fields.
-  APPROVED_LINE="$(printf '%s' "$HUMAN_CONTENT" | grep '^approved-by: ' | head -1 || true)"
-  H_SHA_LINE="$(printf '%s' "$HUMAN_CONTENT" | grep '^diff-sha256: ' | head -1 || true)"
-
-  if [[ -z "$APPROVED_LINE" ]] || [[ -z "$H_SHA_LINE" ]]; then
-    cat >&2 <<'EOF'
-auto-critic: human-gate marker is missing required fields. Both lines are required:
-    approved-by: human
-    diff-sha256: <sha256 of git diff origin/<default-branch>...HEAD>
-STOP — this file must be written by the human, not the agent.
-EOF
-    exit 2
+  if [[ "$CLAUDE_OK" -eq 0 ]]; then
+    echo "  claude : OK (consumed)"
+  else
+    echo "  claude : MISSING/INVALID — ${CLAUDE_REASON}"
   fi
-
-  APPROVED_VAL="$(printf '%s' "$APPROVED_LINE" | sed 's/^approved-by: //')"
-  H_STORED_SHA="$(printf '%s' "$H_SHA_LINE" | sed 's/^diff-sha256: //')"
-
-  if [[ "$APPROVED_VAL" != "human" ]]; then
-    cat >&2 <<EOF
-auto-critic: human-gate marker has 'approved-by: ${APPROVED_VAL}', expected 'human'.
-STOP — this file must be written by the human, not the agent.
-EOF
-    exit 2
+  echo
+  if [[ "$PROTOCOL_CHANGED" -eq 1 ]]; then
+    echo "Protocol-artifact paths are in this diff (audit signal):"
+    printf '%s' "$MATCHED_PATHS"
+    echo "The rule is the SAME as any other push — BOTH markers, strictly, no bypass and no"
+    echo "single-marker degradation. Protocol paths get no weaker and no stronger gate here."
+    echo
   fi
-
-  # Recompute diff sha256 and compare.
-  # Capture the git diff rc explicitly (do NOT swallow it): on non-zero rc the diff is
-  # untrustworthy, so fail CLOSED with exit 2 rather than comparing a partial/empty hash.
-  # The `|| H_DIFF_RC=$?` guard keeps the statement's own status zero so `set -e` does not
-  # abort before the rc is captured.
-  H_DIFF_RC=0
-  H_LIVE_DIFF="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null)" || H_DIFF_RC=$?
-  if [[ "$H_DIFF_RC" -ne 0 ]]; then
-    cat >&2 <<EOF
-auto-critic: 'git diff ${DEFAULT_REF}...HEAD' failed (rc=${H_DIFF_RC}) at the human gate; the
-diff cannot be verified, so the push is BLOCKED (fail-closed). Resolve the git error and re-run.
-EOF
-    exit 2
-  fi
-  H_LIVE_SHA="$(printf '%s' "$H_LIVE_DIFF" | sha256_of)"
-
-  if [[ "$H_LIVE_SHA" != "$H_STORED_SHA" ]]; then
-    cat >&2 <<EOF
-auto-critic: human-gate diff-sha256 mismatch — the diff changed since the human approved it.
-
-  Stored : ${H_STORED_SHA}
-  Current: ${H_LIVE_SHA}
-
-STOP — ask the human owner to re-approve:
-  DIFF_SHA=\$(git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}')
-  printf 'approved-by: human\ndiff-sha256: %s\n' "\$DIFF_SHA" > ~/.claude-human-approved
-EOF
-    exit 2
-  fi
-
-  # Human gate passed.
-  exit 0
-fi
-
-# No human marker file — emit instruction block (STOP message to agent).
-H_SHA_HINT="$(git diff "${DEFAULT_REF}...HEAD" 2>/dev/null | sha256_of || echo "<run: git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}'>")"
-
-cat >&2 <<EOF
-auto-critic: STOP — protocol-artifact paths are changed and require human approval before push.
-
-Matched protocol paths:
-${MATCHED_PATHS}
-This marker MUST be written by the human owner, not the agent.
-Writing ~/.claude-human-approved from inside the agent is a protocol violation (same trust model
-as 'bypass: owner-accepted-risk' — it works mechanically but breaks the co-system contract).
-
-Note: the critic marker was already consumed by the critic gate above — each retry after a
-human-gate block requires BOTH a fresh critic pass AND a fresh human marker.
-
-Ask the owner to run in the Claude Code prompt:
-  ! DIFF_SHA=\$(git diff ${DEFAULT_REF}...HEAD | sha256sum | awk '{print \$1}'); printf 'approved-by: human\ndiff-sha256: %s\n' "\$DIFF_SHA" > ~/.claude-human-approved
-
-  Current diff sha256 (for reference): ${H_SHA_HINT}
-
-Then re-run the original push command (after completing a fresh critic pass first).
-EOF
+  echo "To unlock the push, BOTH co-signers sign (each as a SEPARATE command), then re-run the"
+  echo "original command. The owner marker MUST be written by the human owner — writing"
+  echo "~/.claude-cosign-owner from inside the agent is a protocol violation (friction point and"
+  echo "audit trail, not cryptographic proof)."
+  echo
+  echo "  # owner co-sign (run by the human owner in the Claude Code prompt):"
+  echo "  ! printf 'cosign: owner\\n' > ~/.claude-cosign-owner"
+  echo
+  echo "  # claude co-sign (after the co-review of the storozh flags / branch diff):"
+  echo "  printf 'cosign: claude\\n' > ~/.claude-cosign-claude"
+  echo
+  echo "Both markers expire after ${COSIGN_TTL}s and are consumed on use — sign both within the"
+  echo "window, then push."
+} >&2
 exit 2

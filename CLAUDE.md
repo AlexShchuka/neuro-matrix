@@ -90,8 +90,9 @@ Add stack-specific rules in `references/per-stack/<stack>.md`. Agents infer stac
 | Design checklist · audit criterion for `adversarial-review` · source of mechanizable linter/CI rules | `robust-by-construction` |
 | Owner reports a harness gap or proposes a protocol change | `harness-improve` |
 | Implement / reproduce a method from a paper or quantitative source | `paper-to-code` |
+| After a multi-repo session produces a C1 changeset-manifest, before the co-sign push gate — routing-check + semantic contra-check vs shield invariants (advisory) | `storozh` (flags, never blocks — owner + Claude co-review) |
 
-Counter: the two **orchestration** skills (`agent-fleet-orchestration`, `adversarial-review`) apply only to multi-agent / multi-stage work — a single-role, single-shot task uses the role agent directly. The **event-triggered** skills (`harness-improve`, `robust-by-construction`, `paper-to-code`) fire on their trigger regardless of scope.
+Counter: the two **orchestration** skills (`agent-fleet-orchestration`, `adversarial-review`) apply only to multi-agent / multi-stage work — a single-role, single-shot task uses the role agent directly. The **event-triggered** skills (`harness-improve`, `robust-by-construction`, `paper-to-code`, `storozh`) fire on their trigger regardless of scope.
 
 ## Agent invocation
 ```
